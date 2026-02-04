@@ -11,10 +11,11 @@ def main():
    ready_for_collection()
 
    # Input verification/consent
-    verification_consent =bool(input("Press Enter to simulate user verification..."))
+    verification_consent = bool(input("Press Enter to simulate user verification..."))
+    
     if verification_consent==True:
-        # Trigger dispense medicine
-        dispense_individual_medicine()
+        # In firmware/dispense_controller.py
+        dispense_all_medicines()
     else:
         call_for_assistance()
 
