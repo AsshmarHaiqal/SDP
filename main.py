@@ -1,26 +1,12 @@
-from firmware.dispense_controller import DispenseController
-from firmware.state_manager import StateManager
-from hardware.servo_controller import MotorController
-from hardware.ir_sensor import IRSensor
-from hardware.display import Display
-from config.hardware_config import *
-import time
+from electronic.servo_controller import ServoController
+
 
 def main():
-   # Show ready for collection
-   ready_for_collection()
+    servo = ServoController()
 
-   # Input verification/consent
-    verification_consent = bool(input("Press Enter to simulate user verification..."))
-    
-    if verification_consent==True:
-        # In firmware/dispense_controller.py
-        dispense_all_medicines()
-    else:
-        call_for_assistance()
+    # TODO: add dispense logic here
 
-   
-
+    servo.cleanup()
 
 
 if __name__ == "__main__":
