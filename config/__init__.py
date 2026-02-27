@@ -1,2 +1,1 @@
-from hardware_config import *
-
+from .hardware_config import *
