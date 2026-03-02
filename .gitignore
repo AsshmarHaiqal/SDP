@@ -1,0 +1,16 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Audit images (generated at runtime — do not commit)
+audit_images/
+
+# Face encodings contain personal biometric data — exclude from version control
+# Enrol faces fresh on each deployment using: python -c "from electronic.facial_recognition import enroll_face; enroll_face('name')"
+faces/*.npy
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
