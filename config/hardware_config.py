@@ -14,7 +14,7 @@ SENSOR_READ_DELAY = 0.1  # seconds
 
 # Timing
 DISPENSE_TIMEOUT = 30  # seconds
-ROTATION_DELAY = 0.5  # seconds between rotations
+ROTATION_DELAY = 0.5   # seconds between rotations
 
 # ── PCA9685 / ServoKit ───────────────────────────────────────────────────────
 # The PCA9685 exposes 16 PWM channels (0–15).
@@ -28,12 +28,39 @@ DISPENSER_COUNT          = 14                    # number of dispenser slots
 DISPENSER_CHANNELS       = list(range(14))       # [0, 1, ..., 13]
 
 SPECIAL_SERVO_CHANNELS   = [14, 15]              # reserved auxiliary channels
-SPECIAL_SERVO_LABEL      = {14: "aux_1", 15: "aux_2"}
+SPECIAL_SERVO_LABEL      = {14: "camera_control", 15: "tray_tilt"}
 
 # Servo pulse-width limits (microseconds) – adjust per servo model if needed
 SERVO_MIN_PULSE = 500   # µs
 SERVO_MAX_PULSE = 2500  # µs
 
 # Dispense cycle angles
-SERVO_HOME_ANGLE    = 0    # resting position (degrees)
+SERVO_HOME_ANGLE     = 0    # resting position (degrees)
 SERVO_DISPENSE_ANGLE = 180  # full-swing position (degrees)
+
+# ── Pill Detection / Dispensing ───────────────────────────────────────────────
+# Auxiliary servo slot indices into SPECIAL_SERVO_CHANNELS.
+# SPECIAL_SERVO_CHANNELS[0] = PCA9685 channel 14 (camera_control)
+# SPECIAL_SERVO_CHANNELS[1] = PCA9685 channel 15 (tray_tilt)
+CAMERA_TILT_SERVO_INDEX = 0
+TRAY_TILT_SERVO_INDEX   = 1
+
+# Camera repositioning
+CAMERA_TILT_ANGLE    = 90    # degrees — points camera downward at tray
+CAMERA_RETURN_ANGLE  = 0     # degrees — forward-facing (face recognition position)
+CAMERA_SETTLE_DELAY  = 1.0   # seconds — wait after repositioning for image to stabilise
+
+# Dispense verification
+PILL_SETTLE_DELAY      = 3.0  # seconds — wait for pill to settle on tray after release
+MAX_DISPENSE_ATTEMPTS  = 5    # retries per pill before halting the session
+
+# Tray tilt
+TRAY_TILT_ANGLE    = 30   # degrees — tilt angle to funnel pills into cup
+TRAY_TILT_DURATION = 3.0  # seconds — hold tilt before capturing post-tilt image
+MAX_TILT_ATTEMPTS  = 3    # retries before staff alert
+
+# User confirmation
+CONFIRM_TIMEOUT = 10  # seconds — wait for resident confirmation before flagging timeout
+
+# Audit image storage
+AUDIT_IMAGE_DIR = "audit_images"  # directory for dispensing audit photos

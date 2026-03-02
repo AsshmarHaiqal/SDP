@@ -48,6 +48,14 @@ class ServoController:
     def rotate_special(self, special_index: int):
         self._rotate(SPECIAL_SERVO_CHANNELS[special_index])
 
+    def set_servo_angle(self, channel: int, angle: float):
+        """Set a servo to a specific angle and hold (no sweep pattern)."""
+        if self.hardware_available:
+            self.kit.servo[channel].angle = float(angle)
+            time.sleep(ROTATION_DELAY)
+        else:
+            time.sleep(ROTATION_DELAY)
+
     def cleanup(self): #Return all servos to 0°
         if self.hardware_available:
             for ch in range(SERVO_KIT_CHANNELS):
