@@ -17,6 +17,7 @@ Usage:
     sound.dispensing()
 """
 
+import subprocess
 import threading
 
 try:
@@ -89,8 +90,6 @@ class SoundActuator:
         if not _TTS_AVAILABLE:
             return
         threading.Thread(target=self._speak, args=(text,), daemon=True).start()
-
-    import subprocess
 
     def _speak(self, text: str):
         subprocess.run(["espeak-ng", text])
