@@ -29,8 +29,8 @@ except ImportError:
 from electronic.servo_controller import ServoController
 
 # ── Deployment ────────────────────────────────────────────────────────────────
-CAMERA_INDEX = 0       # 0 = laptop built-in  |  1 = Pi camera
-FULLSCREEN   = False   # True on Raspberry Pi
+CAMERA_INDEX = 1       # 0 = laptop built-in  |  1 = Pi camera
+FULLSCREEN   = True   # True on Raspberry Pi
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 BG       = "#1a1a2e"
