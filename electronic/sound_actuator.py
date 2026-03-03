@@ -49,7 +49,7 @@ class SoundActuator:
     so the UI never freezes waiting for speech to finish.
     """
 
-    def __init__(self, rate: int = 150, volume: float = 1.0):
+    def __init__(self, rate: int = 120, volume: float = 1.0):
         self.rate   = rate    # words per minute (default espeak: 200)
         self.volume = volume  # 0.0 – 1.0
 
@@ -90,11 +90,7 @@ class SoundActuator:
             return
         threading.Thread(target=self._speak, args=(text,), daemon=True).start()
 
+    import subprocess
+
     def _speak(self, text: str):
-        # Initialise a fresh engine per call — avoids pyttsx3 threading issues
-        engine = pyttsx3.init()
-        engine.setProperty("rate",   self.rate)
-        engine.setProperty("volume", self.volume)
-        engine.say(text)
-        engine.runAndWait()
-        engine.stop()
+        subprocess.run(["espeak-ng", text])
