@@ -18,6 +18,7 @@ import warnings
 
 import cv2
 import numpy as np
+from PIL import Image, ImageTk
 
 try:
     import face_recognition as _fr_lib
@@ -30,15 +31,15 @@ from electronic.servo_controller import ServoController
 
 # ── Deployment ────────────────────────────────────────────────────────────────
 CAMERA_INDEX = 1       # 0 = laptop built-in  |  1 = Pi camera
-FULLSCREEN   = True   # True on Raspberry Pi
+FULLSCREEN   = False   # True on Raspberry Pi
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-BG       = "#1a1a2e"
-PRIMARY  = "#00b4d8"
+BG       = "#E7E7F1"
+PRIMARY  = "#0b0b0b"
 SUCCESS  = "#2dc653"
 DANGER   = "#e63946"
 DISABLED = "#6c757d"
-TEXT     = "#ffffff"
+TEXT     = "#0A0404"
 
 # ── Fonts ─────────────────────────────────────────────────────────────────────
 F_H1    = ("Arial", 42, "bold")
@@ -62,6 +63,12 @@ def _enc(filename: str):
     return path if os.path.exists(path) else None
 
 
+def _patient_enc_path(patient: dict) -> str:
+    """Derive the canonical .npy save path for a patient from their name."""
+    filename = patient["name"].lower().replace(" ", "_") + ".npy"
+    return os.path.join(_ROOT, "faces", filename)
+
+
 PATIENTS = [
     {"id": 1, "name": "Asshmar",   "encoding": _enc("asshmar.npy")},
     {"id": 2, "name": "Patient 2", "encoding": None},
@@ -72,8 +79,8 @@ PATIENTS = [
 
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
-def speak(text: str):
-    """Non-blocking TTS. Tries pyttsx3 → espeak → silent with warning."""
+"""def speak(text: str):
+    #Non-blocking TTS. Tries pyttsx3 → espeak → silent with warning.
     def _say():
         try:
             import pyttsx3
@@ -88,8 +95,18 @@ def speak(text: str):
             except Exception:
                 warnings.warn(f"TTS unavailable: {text}")
 
+    threading.Thread(target=_say, daemon=True).start()"""
+def speak(text: str):
+    def _say():
+        try:
+            import platform
+            if platform.system() == "Darwin":
+                subprocess.call(["say", text])
+            else:
+                subprocess.call(["espeak-ng", text])
+        except Exception as e:
+            warnings.warn(f"TTS unavailable: {text} — {e}")
     threading.Thread(target=_say, daemon=True).start()
-
 
 # ── Shared UI helper ──────────────────────────────────────────────────────────
 def _cancel_btn(parent, cmd):
@@ -209,7 +226,7 @@ class MaintenanceScreen(tk.Frame):
         self._spk_btn.config(state="disabled", bg=DISABLED)
         self._set_status("Playing...")
 
-        def _work():
+        """def _work():
             phrase = "Testing speaker. One, two, three."
             try:
                 import pyttsx3
@@ -222,7 +239,17 @@ class MaintenanceScreen(tk.Frame):
                 try:
                     subprocess.call(["espeak", phrase])
                 except Exception:
-                    pass
+                    pass"""
+        def _work():
+            phrase = "Testing speaker. One, two, three."
+            try:
+                import platform
+                if platform.system() == "Darwin":
+                    subprocess.call(["say", phrase])
+                else:
+                    subprocess.call(["espeak-ng", phrase])
+            except Exception:
+                pass
 
             def _done():
                 self._set_status("Speaker OK ✓")
@@ -249,8 +276,7 @@ class MaintenanceScreen(tk.Frame):
     def _test_servo2(self): self._run_servo_test(self._s2_btn, "Servo 2", 1)
 
     def _register_info(self):
-        self._set_status(
-            "Use the Pi camera directly to register new patients. Coming soon.")
+        self._app.show("RegisterFacePage")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -288,21 +314,28 @@ class CallingScreen(tk.Frame):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class FaceVerifyScreen(tk.Frame):
+    _FEED_W       = 400   # display width of camera feed (pixels)
+    _FEED_H       = 300   # display height of camera feed (pixels)
+    _MAX_ATTEMPTS = 5     # failed face-match frames before giving up
+
     def __init__(self, app):
         super().__init__(app, bg=BG)
         self._app       = app
-        self._anim_id   = None
-        self._anim_step = 0
+        self._stop_feed = threading.Event()
 
         self._cancel_btn = _cancel_btn(self, self._cancel)
 
         tk.Label(self, text="Please look at the camera.",
-                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(60, 20))
+                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(10, 6))
 
-        self._scan_var = tk.StringVar()
-        self._scan_lbl = tk.Label(self, textvariable=self._scan_var,
-                                  font=F_BODY, fg=TEXT, bg=BG)
-        self._scan_lbl.pack()
+        # Live camera feed displayed here
+        self._feed_lbl = tk.Label(self, bg="#000000")
+        self._feed_lbl.pack()
+
+        self._status_var = tk.StringVar(value="")
+        self._status_lbl = tk.Label(self, textvariable=self._status_var,
+                                    font=F_BODY, fg=TEXT, bg=BG)
+        self._status_lbl.pack(pady=8)
 
         # Shown only on verification failure
         self._return_btn = tk.Button(
@@ -314,78 +347,101 @@ class FaceVerifyScreen(tk.Frame):
         )
 
     def on_show(self):
-        # Reset to neutral state
+        self._stop_feed.set()    # stop any previous loop
+        self._stop_feed.clear()  # arm for this session
         self.configure(bg=BG)
-        self._scan_lbl.configure(bg=BG, fg=TEXT)
+        self._status_lbl.configure(bg=BG, fg=TEXT)
+        self._status_var.set("Scanning...")
         self._return_btn.pack_forget()
         self._cancel_btn.place(x=12, y=12)
-        self._start_animation()
         speak("Performing facial recognition. Please look at the camera.")
-        threading.Thread(target=self._run_recognition, daemon=True).start()
+        threading.Thread(target=self._camera_loop, daemon=True).start()
 
-    # ── Animation ─────────────────────────────────────────────────────────────
+    # ── Camera loop (background thread) ──────────────────────────────────────
 
-    def _start_animation(self):
-        self._anim_step = 0
-        self._animate()
-
-    def _animate(self):
-        dots = "." * ((self._anim_step % 3) + 1)
-        self._scan_var.set(f"Scanning {dots}")
-        self._anim_step += 1
-        self._anim_id = self.after(500, self._animate)
-
-    def _stop_animation(self):
-        if self._anim_id:
-            self.after_cancel(self._anim_id)
-            self._anim_id = None
-
-    # ── Recognition (background thread) ──────────────────────────────────────
-
-    def _run_recognition(self):
+    def _camera_loop(self):
         if not _FR_AVAILABLE:
             self._app.after(0, lambda: self._on_result(False))
             return
 
-        patient = self._app.current_patient
-        ref     = np.load(patient["encoding"])
-        cap     = cv2.VideoCapture(CAMERA_INDEX)
-        result  = False
+        patient       = self._app.current_patient
+        ref           = np.load(patient["encoding"])
+        cap           = cv2.VideoCapture(CAMERA_INDEX)
+        verified      = False
+        face_attempts = 0
 
-        for _ in range(5):
+        while not self._stop_feed.is_set():
             ret, frame = cap.read()
             if not ret:
-                continue
-            rgb       = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            encodings = _fr_lib.face_encodings(rgb)
-            if encodings:
-                if _fr_lib.compare_faces([ref], encodings[0], tolerance=0.5)[0]:
-                    result = True
-                    break
+                break
+
+            # Resize to display dimensions
+            display = cv2.resize(frame, (self._FEED_W, self._FEED_H))
+            rgb     = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
+
+            # Detect and encode at half scale for speed; scale coords back up
+            small     = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
+            locations = _fr_lib.face_locations(small)
+            encodings = _fr_lib.face_encodings(small, locations)
+
+            for (top, right, bottom, left), enc in zip(locations, encodings):
+                top    *= 2; right  *= 2
+                bottom *= 2; left   *= 2
+
+                matched = _fr_lib.compare_faces([ref], enc, tolerance=0.5)[0]
+                if matched:
+                    verified = True
+                else:
+                    face_attempts += 1
+
+                # Green = matched, red = not matched
+                color = (0, 200, 80) if matched else (220, 50, 50)
+                cv2.rectangle(rgb, (left, top), (right, bottom), color, 3)
+
+            # Push frame to the UI label
+            photo = ImageTk.PhotoImage(image=Image.fromarray(rgb))
+            self._app.after(0, lambda p=photo: self._update_feed(p))
+
+            if verified:
+                time.sleep(0.8)  # hold the green frame briefly before advancing
+                break
+
+            if face_attempts >= self._MAX_ATTEMPTS:
+                break
+
+            time.sleep(0.04)  # ~25 fps
 
         cap.release()
-        self._app.after(0, lambda: self._on_result(result))
+
+        # Only fire result if the user didn't cancel
+        if not self._stop_feed.is_set():
+            self._app.after(0, lambda: self._on_result(verified))
+
+    def _update_feed(self, photo):
+        self._feed_lbl.configure(image=photo)
+        self._feed_lbl.image = photo  # prevent garbage collection
 
     def _on_result(self, verified: bool):
-        self._stop_animation()
+        # Clear the camera feed
+        self._feed_lbl.configure(image="")
+        self._feed_lbl.image = None
 
         if verified:
-            self._scan_var.set("")
+            self._status_var.set("")
             self.configure(bg=SUCCESS)
-            self._scan_lbl.configure(bg=SUCCESS)
+            self._status_lbl.configure(bg=SUCCESS)
             speak("Identity verified.")
             self.after(1000, lambda: self._app.show("DispensingScreen"))
         else:
             self.configure(bg=DANGER)
-            self._scan_lbl.configure(bg=DANGER)
-            self._scan_var.set(
-                "Verification failed. Please call for assistance.")
+            self._status_lbl.configure(bg=DANGER)
+            self._status_var.set("Verification failed. Please call for assistance.")
             speak("Verification failed. Please call for assistance.")
             self._cancel_btn.place_forget()
             self._return_btn.pack(pady=20)
 
     def _cancel(self):
-        self._stop_animation()
+        self._stop_feed.set()
         self._app.show("MainScreen")
 
 
@@ -449,9 +505,7 @@ class CollectionScreen(tk.Frame):
         reminders = tk.Frame(self, bg=BG)
         reminders.pack(pady=4)
         for line in (
-            "💊  Take with food or milk",
-            "💧  Take with a full glass of water",
-            "⏰  Take at the same time each day",
+            "💊  Please take the medication after eating.",
         ):
             tk.Label(reminders, text=line,
                      font=("Arial", 22), fg=TEXT, bg=BG,
@@ -538,13 +592,176 @@ class AssistanceScreen(tk.Frame):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  APP ROOT
+#  REGISTER FACE PAGE
 # ══════════════════════════════════════════════════════════════════════════════
+
+class RegisterFacePage(tk.Frame):
+    """
+    Manage face encodings for patients 2–5.
+    Patient 1 (Asshmar) is protected and excluded from this screen.
+    """
+    _PROTECTED_ID = 1  # Asshmar – cannot be cleared here
+
+    def __init__(self, app):
+        super().__init__(app, bg=BG)
+        self._app  = app
+        self._rows = {}   # patient_id → {status_var, status_lbl, clear_btn, add_btn, patient}
+
+        tk.Label(self, text="Manage Patient Faces",
+                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(16, 8))
+
+        rows_frame = tk.Frame(self, bg=BG)
+        rows_frame.pack(fill="x", padx=50, pady=2)
+
+        for patient in PATIENTS:
+            if patient["id"] == self._PROTECTED_ID:
+                continue
+            self._build_row(rows_frame, patient)
+
+        self._status_var = tk.StringVar(value="")
+        tk.Label(self, textvariable=self._status_var,
+                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=10)
+
+        tk.Button(
+            self, text="← Back to Maintenance",
+            font=F_BTN, bg=DANGER, fg=TEXT,
+            activebackground=DANGER, activeforeground=TEXT,
+            width=22, height=2, relief="raised", bd=4,
+            command=lambda: app.show("MaintenanceScreen"),
+        ).pack(pady=4)
+
+    def on_show(self):
+        """Refresh row status indicators each time the page is raised."""
+        self._status_var.set("")
+        for pid, row in self._rows.items():
+            patient  = row["patient"]
+            has_face = bool(patient["encoding"] and
+                            os.path.exists(patient["encoding"]))
+            row["status_var"].set("✓ Registered" if has_face else "Not registered")
+            row["status_lbl"].config(fg=SUCCESS if has_face else DISABLED)
+            row["clear_btn"].config(
+                state="normal" if has_face else "disabled",
+                bg=DANGER if has_face else DISABLED,
+            )
+
+    # ── Row builder ───────────────────────────────────────────────────────────
+
+    def _build_row(self, parent, patient):
+        pid      = patient["id"]
+        has_face = bool(patient["encoding"] and os.path.exists(patient["encoding"]))
+
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", pady=5)
+
+        tk.Label(row, text=patient["name"],
+                 font=F_BODY, fg=TEXT, bg=BG,
+                 width=12, anchor="w").pack(side="left", padx=(0, 10))
+
+        status_var = tk.StringVar(value="✓ Registered" if has_face else "Not registered")
+        status_lbl = tk.Label(row, textvariable=status_var,
+                               font=F_BODY,
+                               fg=SUCCESS if has_face else DISABLED,
+                               bg=BG, width=15, anchor="w")
+        status_lbl.pack(side="left", padx=(0, 10))
+
+        add_btn = tk.Button(
+            row, text="Capture Face",
+            font=("Arial", 16, "bold"), bg=PRIMARY, fg=TEXT,
+            activebackground=PRIMARY, activeforeground=TEXT,
+            width=14, height=2, relief="raised", bd=3,
+            command=lambda p=pid: self._capture_face(p),
+        )
+        add_btn.pack(side="left", padx=(0, 8))
+
+        clear_btn = tk.Button(
+            row, text="Clear Face",
+            font=("Arial", 16, "bold"),
+            bg=DANGER if has_face else DISABLED, fg=TEXT,
+            activebackground=DANGER, activeforeground=TEXT,
+            width=12, height=2, relief="raised", bd=3,
+            state="normal" if has_face else "disabled",
+            command=lambda p=pid: self._clear_face(p),
+        )
+        clear_btn.pack(side="left")
+
+        self._rows[pid] = {
+            "patient":    patient,
+            "status_var": status_var,
+            "status_lbl": status_lbl,
+            "add_btn":    add_btn,
+            "clear_btn":  clear_btn,
+        }
+
+    # ── Actions ───────────────────────────────────────────────────────────────
+
+    def _capture_face(self, pid):
+        row     = self._rows[pid]
+        patient = row["patient"]
+
+        row["add_btn"].config(state="disabled", bg=DISABLED)
+        self._status_var.set(
+            f"Capturing face for {patient['name']} — look at the camera...")
+
+        def _work():
+            save_path = _patient_enc_path(patient)
+            success   = False
+
+            if _FR_AVAILABLE:
+                cap = cv2.VideoCapture(CAMERA_INDEX)
+                for _ in range(15):          # try up to 15 frames
+                    ret, frame = cap.read()
+                    if not ret:
+                        continue
+                    rgb       = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    encodings = _fr_lib.face_encodings(rgb)
+                    if encodings:
+                        os.makedirs(os.path.join(_ROOT, "faces"), exist_ok=True)
+                        np.save(save_path, encodings[0])
+                        patient["encoding"] = save_path
+                        success = True
+                        break
+                cap.release()
+
+            self._app.after(0, lambda: self._on_capture_done(pid, success))
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_capture_done(self, pid, success):
+        row = self._rows[pid]
+        row["add_btn"].config(state="normal", bg=PRIMARY)
+        if success:
+            row["status_var"].set("✓ Registered")
+            row["status_lbl"].config(fg=SUCCESS)
+            row["clear_btn"].config(state="normal", bg=DANGER)
+            self._status_var.set(
+                f"✓ Face registered for {row['patient']['name']}.")
+        else:
+            self._status_var.set("✗ No face detected — check lighting and try again.")
+
+    def _clear_face(self, pid):
+        row     = self._rows[pid]
+        patient = row["patient"]
+        path    = patient["encoding"]
+
+        if path and os.path.exists(path):
+            os.remove(path)
+        patient["encoding"] = None
+
+        row["status_var"].set("Not registered")
+        row["status_lbl"].config(fg=DISABLED)
+        row["clear_btn"].config(state="disabled", bg=DISABLED)
+        self._status_var.set(f"✓ Face cleared for {patient['name']}.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  APP ROOT
+# ══════════���═══════════════════════════════════════════════════════════════════
 
 class App(tk.Tk):
     _SCREENS = (
         MainScreen,
         MaintenanceScreen,
+        RegisterFacePage,
         CallingScreen,
         FaceVerifyScreen,
         DispensingScreen,
