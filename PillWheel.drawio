@@ -4,8 +4,34 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="bSM80wlMO8tzmLdDC_vE-1" parent="1" style="ellipse;whiteSpace=wrap;html=1;" value="" vertex="1">
-          <mxGeometry height="80" width="120" x="360" y="140" as="geometry" />
+        <mxCell id="L1IlPqKwktfXEx6gtGep-2" edge="1" parent="1" source="bSM80wlMO8tzmLdDC_vE-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="L1IlPqKwktfXEx6gtGep-1" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bSM80wlMO8tzmLdDC_vE-1" parent="1" style="ellipse;whiteSpace=wrap;html=1;" value="Start" vertex="1">
+          <mxGeometry height="80" width="120" x="330" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-4" edge="1" parent="1" source="L1IlPqKwktfXEx6gtGep-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="L1IlPqKwktfXEx6gtGep-3" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-1" parent="1" style="whiteSpace=wrap;html=1;" value="Initialise" vertex="1">
+          <mxGeometry height="60" width="120" x="330" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-6" edge="1" parent="1" source="L1IlPqKwktfXEx6gtGep-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="L1IlPqKwktfXEx6gtGep-7" value="Yes">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="390" y="370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-3" parent="1" style="whiteSpace=wrap;html=1;" value="Ready for Collection" vertex="1">
+          <mxGeometry height="60" width="120" x="330" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-11" edge="1" parent="1" source="L1IlPqKwktfXEx6gtGep-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="L1IlPqKwktfXEx6gtGep-10" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-7" parent="1" style="rhombus;whiteSpace=wrap;html=1;" value="Facial Verification" vertex="1">
+          <mxGeometry height="80" width="140" x="320" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="L1IlPqKwktfXEx6gtGep-10" parent="1" style="rhombus;whiteSpace=wrap;html=1;" value="Verify Prescription" vertex="1">
+          <mxGeometry height="80" width="140" x="320" y="480" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
