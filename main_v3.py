@@ -1,11 +1,12 @@
 """
-main_v2.py
-PillWheel — Patient Collection Flow
-Raspberry Pi touchscreen UI (800×480, fullscreen)
+main_v3.py
+PillWheel — Patient Collection Flow  (v3)
+Compact layout for 800×480 Pi display.
+Green + pink accessible colour scheme.
 
 Run on Pi:
     export DISPLAY=:0
-    sudo -E python3 main_v2.py
+    sudo -E python3 main_v3.py
 """
 
 import datetime
@@ -30,24 +31,29 @@ except ImportError:
 from electronic.servo_controller import ServoController
 
 # ── Deployment ────────────────────────────────────────────────────────────────
-CAMERA_INDEX = 1       # 0 = laptop built-in  |  1 = Pi camera
-FULLSCREEN   = False   # True on Raspberry Pi
+CAMERA_INDEX = 1      # 0 = laptop  |  1 = Pi
+FULLSCREEN   = False  # True on Raspberry Pi
 
-# ── Colours ───────────────────────────────────────────────────────────────────
-BG       = "#E7E7F1"
-PRIMARY  = "#6B9465"
-SUCCESS  = "#2dc653"
-DANGER   = "#e63946"
-DISABLED = "#6B9465"
-TEXT     = "#0A0404"
+# ── Colour scheme ─────────────────────────────────────────────────────────────
+#   Shades of green + rose-pink, black text — WCAG AA compliant
+BG        = "#f2f7f3"   # light mint white  (background)
+HDR_BG    = "#1b3a2d"   # deep forest green (header bars)
+PRIMARY   = "#3d7a52"   # sage green        (primary actions)
+SUCCESS   = "#27a348"   # bright green      (confirm / success)
+DANGER    = "#b83258"   # deep rose-pink    (cancel / danger)
+PINK_LT   = "#f9e8ef"   # blush pink        (assistance screen bg)
+DISABLED  = "#8aab91"   # muted sage        (disabled)
+TEXT      = "#1a1a1a"   # near-black        (body text)
+TEXT_LT   = "#ffffff"   # white             (on dark/coloured buttons)
+CARD      = "#ffffff"   # white             (card backgrounds)
 
-# ── Fonts ─────────────────────────────────────────────────────────────────────
-F_H1    = ("Arial", 42, "bold")
-F_H2    = ("Arial", 32, "bold")
-F_BODY  = ("Arial", 22)
-F_BTN   = ("Arial", 22, "bold")
-F_MAINT = ("Arial", 18, "bold")
-F_SM    = ("Arial", 14)
+# ── Fonts  (Helvetica renders cleanly on both Pi and macOS) ──────────────────
+F_H1    = ("Helvetica", 34, "bold")
+F_H2    = ("Helvetica", 24, "bold")
+F_BODY  = ("Helvetica", 17)
+F_BTN   = ("Helvetica", 15, "bold")
+F_MAINT = ("Helvetica", 13, "bold")
+F_SM    = ("Helvetica", 11)
 
 W, H = 800, 480
 
@@ -57,17 +63,13 @@ _AUDIT_LOG = os.path.join(_ROOT, "audit_log.txt")
 
 
 # ── Patients ──────────────────────────────────────────────────────────────────
-def _enc(filename: str):
-    """Return absolute path to a face encoding if it exists, else None."""
+def _enc(filename):
     path = os.path.join(_ROOT, "faces", filename)
     return path if os.path.exists(path) else None
 
-
-def _patient_enc_path(patient: dict) -> str:
-    """Derive the canonical .npy save path for a patient from their name."""
+def _patient_enc_path(patient):
     filename = patient["name"].lower().replace(" ", "_") + ".npy"
     return os.path.join(_ROOT, "faces", filename)
-
 
 PATIENTS = [
     {"id": 1, "name": "Asshmar",   "encoding": _enc("asshmar.npy")},
@@ -79,46 +81,51 @@ PATIENTS = [
 
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
-"""def speak(text: str):
-    #Non-blocking TTS. Tries pyttsx3 → espeak → silent with warning.
-    def _say():
-        try:
-            import pyttsx3
-            engine = pyttsx3.init()
-            engine.setProperty("rate", 120)
-            engine.say(text)
-            engine.runAndWait()
-            engine.stop()
-        except Exception:
-            try:
-                subprocess.call(["espeak", text])
-            except Exception:
-                warnings.warn(f"TTS unavailable: {text}")
-
-    threading.Thread(target=_say, daemon=True).start()"""
 def speak(text: str):
     def _say():
         try:
             import platform
-            if platform.system() == "Darwin":
-                subprocess.call(["say", text])
-            else:
-                subprocess.call(["espeak-ng", text])
+            cmd = ["say", text] if platform.system() == "Darwin" else ["espeak-ng", text]
+            subprocess.call(cmd)
         except Exception as e:
-            warnings.warn(f"TTS unavailable: {text} — {e}")
+            warnings.warn(f"TTS unavailable: {e}")
     threading.Thread(target=_say, daemon=True).start()
 
-# ── Shared UI helper ──────────────────────────────────────────────────────────
-def _cancel_btn(parent, cmd):
-    """Small red ✕ Cancel button placed at top-left."""
-    btn = tk.Button(
-        parent, text="✕  Cancel",
-        font=F_SM, bg=DANGER, fg=TEXT,
-        activebackground=DANGER, activeforeground=TEXT,
-        relief="raised", bd=3, command=cmd,
-    )
-    btn.place(x=12, y=12)
-    return btn
+
+# ── Shared UI helpers ─────────────────────────────────────────────────────────
+
+def _header(parent, title: str, cancel_cmd=None):
+    """
+    52-px dark-green header bar with title.
+    If cancel_cmd is given, adds a rose ✕ Cancel button on the right.
+    Returns (bar, cancel_btn) — cancel_btn is None when not created.
+    """
+    bar = tk.Frame(parent, bg=HDR_BG, height=52)
+    bar.pack(fill="x")
+    bar.pack_propagate(False)
+
+    tk.Label(bar, text=title, bg=HDR_BG, fg=TEXT_LT,
+             font=F_H2, anchor="w").pack(side="left", padx=14)
+
+    cancel_btn = None
+    if cancel_cmd:
+        cancel_btn = tk.Button(
+            bar, text="✕  Cancel",
+            font=F_SM, bg=DANGER, fg=TEXT_LT,
+            activebackground=DANGER, activeforeground=TEXT_LT,
+            relief="flat", bd=0, padx=12, pady=5,
+            command=cancel_cmd)
+        cancel_btn.pack(side="right", padx=8, pady=7)
+
+    return bar, cancel_btn
+
+
+def _btn(parent, text, cmd, bg=PRIMARY, fg=TEXT_LT, font=None, **kw):
+    """Standard action button."""
+    return tk.Button(
+        parent, text=text, command=cmd,
+        bg=bg, fg=fg, activebackground=bg, activeforeground=fg,
+        font=font or F_BTN, relief="raised", bd=2, **kw)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -130,61 +137,49 @@ class MainScreen(tk.Frame):
         super().__init__(app, bg=BG)
         self._app = app
 
-        tk.Label(self, text="PillWheel",
-                 font=F_H1, fg=TEXT, bg=BG).pack(pady=(28, 4))
+        # Header — Maintenance button lives here, top-right
+        bar, _ = _header(self, "💊  PillWheel")
+        tk.Button(
+            bar, text="Maintenance",
+            font=F_SM, bg="#2d5a40", fg=TEXT_LT,
+            activebackground="#2d5a40", activeforeground=TEXT_LT,
+            relief="flat", bd=0, padx=10, pady=5,
+            command=lambda: app.show("MaintenanceScreen"),
+        ).pack(side="right", padx=8, pady=7)
+
         tk.Label(self, text="Select a patient to begin collection",
-                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=(0, 16))
+                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=(10, 6))
 
         grid = tk.Frame(self, bg=BG)
         grid.pack()
 
         for i, patient in enumerate(PATIENTS):
             row, col = divmod(i, 3)
-            tk.Button(
-                grid, text=patient["name"],
-                font=F_BTN, bg=PRIMARY, fg=TEXT,
-                activebackground=PRIMARY, activeforeground=TEXT,
-                width=18, height=3, relief="raised", bd=4,
-                command=lambda p=patient: self._select(p),
-            ).grid(row=row, column=col, padx=8, pady=6)
+            _btn(grid, patient["name"],
+                 lambda p=patient: self._select(p),
+                 width=14, height=2,
+                 ).grid(row=row, column=col, padx=6, pady=5)
 
-        # Maintenance — small, bottom-right corner
-        tk.Button(
-            self, text="Maintenance",
-            font=F_SM, bg=DISABLED, fg=TEXT,
-            activebackground=DISABLED, activeforeground=TEXT,
-            width=14, height=2, relief="raised", bd=2,
-            command=lambda: app.show("MaintenanceScreen"),
-        ).place(relx=1.0, rely=1.0, anchor="se", x=-12, y=-12)
-
-    def _select(self, patient: dict):
+    def _select(self, patient):
         if not patient["encoding"]:
-            self._unregistered_popup(patient["name"])
+            self._popup(patient["name"])
             return
         self._app.current_patient = patient
         self._app.show("CallingScreen")
 
-    def _unregistered_popup(self, name: str):
-        overlay = tk.Frame(self, bg="#2a2a45", relief="solid", bd=2)
-        overlay.place(relx=0.5, rely=0.5, anchor="center", width=480, height=220)
-
-        tk.Label(overlay, text="Patient Not Registered",
-                 font=F_H2, fg=TEXT, bg="#2a2a45").pack(pady=(22, 8))
-        tk.Label(overlay,
-                 text=f"{name} has no registered face.\n"
-                      "Please register in Maintenance Mode.",
-                 font=F_BODY, fg=TEXT, bg="#2a2a45",
-                 justify="center").pack()
-        tk.Button(
-            overlay, text="OK",
-            font=F_BTN, bg=PRIMARY, fg=TEXT,
-            activebackground=PRIMARY, activeforeground=TEXT,
-            width=10, height=2, relief="raised", bd=3,
-            command=overlay.destroy,
-        ).pack(pady=16)
+    def _popup(self, name):
+        ov = tk.Frame(self, bg=CARD, relief="solid", bd=1,
+                      highlightbackground=PRIMARY, highlightthickness=2)
+        ov.place(relx=0.5, rely=0.5, anchor="center", width=440, height=200)
+        tk.Label(ov, text="Patient Not Registered",
+                 font=F_H2, fg=TEXT, bg=CARD).pack(pady=(18, 6))
+        tk.Label(ov, text=f"{name} has no registered face.\n"
+                          "Please register in Maintenance.",
+                 font=F_BODY, fg=TEXT, bg=CARD, justify="center").pack()
+        _btn(ov, "OK", ov.destroy, width=10, height=2).pack(pady=12)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════���════════════════════════════════════════════
 #  SCREEN 2 — MAINTENANCE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -193,90 +188,62 @@ class MaintenanceScreen(tk.Frame):
         super().__init__(app, bg=BG)
         self._app = app
 
-        tk.Label(self, text="Maintenance",
-                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(20, 14))
+        _header(self, "⚙  Maintenance")
 
         grid = tk.Frame(self, bg=BG)
-        grid.pack()
+        grid.pack(pady=16)
 
-        self._spk_btn = self._btn(grid, "Test Speaker",    self._test_speaker, 0, 0)
-        self._s1_btn  = self._btn(grid, "Test Servo 1",    self._test_servo1,  0, 1)
-        self._s2_btn  = self._btn(grid, "Test Servo 2",    self._test_servo2,  0, 2)
-        self._btn(grid, "Register New Face", self._register_info,          1, 0, bg=DISABLED)
-        self._btn(grid, "← Back to Main",   lambda: app.show("MainScreen"), 1, 2, bg=DANGER)
+        self._spk_btn = self._mb(grid, "🔊  Test Speaker",  self._test_speaker, 0, 0)
+        self._s1_btn  = self._mb(grid, "⚙  Test Servo 1",  self._test_servo1,  0, 1)
+        self._s2_btn  = self._mb(grid, "⚙  Test Servo 2",  self._test_servo2,  0, 2)
+        self._mb(grid, "📷  Register Faces",
+                 lambda: app.show("RegisterFacePage"),   1, 0)
+        self._mb(grid, "← Back to Main",
+                 lambda: app.show("MainScreen"), 1, 2, bg=DANGER)
 
         self._status_var = tk.StringVar(value="")
         tk.Label(self, textvariable=self._status_var,
-                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=14)
+                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=10)
 
     @staticmethod
-    def _btn(parent, text, cmd, row, col, bg=PRIMARY):
-        b = tk.Button(
-            parent, text=text, font=F_MAINT,
-            bg=bg, fg=TEXT, activebackground=bg, activeforeground=TEXT,
-            width=18, height=3, relief="raised", bd=4, command=cmd,
-        )
-        b.grid(row=row, column=col, padx=10, pady=8)
+    def _mb(parent, text, cmd, row, col, bg=PRIMARY):
+        b = _btn(parent, text, cmd, bg=bg, width=16, height=2, font=F_MAINT)
+        b.grid(row=row, column=col, padx=8, pady=6)
         return b
 
-    def _set_status(self, text: str):
-        self._status_var.set(text)
+    def _set(self, text): self._status_var.set(text)
 
     def _test_speaker(self):
         self._spk_btn.config(state="disabled", bg=DISABLED)
-        self._set_status("Playing...")
-
-        """def _work():
-            phrase = "Testing speaker. One, two, three."
-            try:
-                import pyttsx3
-                engine = pyttsx3.init()
-                engine.setProperty("rate", 120)
-                engine.say(phrase)
-                engine.runAndWait()
-                engine.stop()
-            except Exception:
-                try:
-                    subprocess.call(["espeak", phrase])
-                except Exception:
-                    pass"""
+        self._set("Playing...")
         def _work():
             phrase = "Testing speaker. One, two, three."
             try:
                 import platform
-                if platform.system() == "Darwin":
-                    subprocess.call(["say", phrase])
-                else:
-                    subprocess.call(["espeak-ng", phrase])
+                cmd = ["say", phrase] if platform.system() == "Darwin" \
+                    else ["espeak-ng", phrase]
+                subprocess.call(cmd)
             except Exception:
                 pass
-
-            def _done():
-                self._set_status("Speaker OK ✓")
-                self._spk_btn.config(state="normal", bg=PRIMARY)
-            self._app.after(0, _done)
-
+            self._app.after(0, lambda: (
+                self._set("Speaker OK ✓"),
+                self._spk_btn.config(state="normal", bg=PRIMARY),
+            ))
         threading.Thread(target=_work, daemon=True).start()
 
-    def _run_servo_test(self, btn, label, index):
+    def _servo_test(self, btn, label, index):
         btn.config(state="disabled", bg=DISABLED)
-        self._set_status(f"Rotating {label}...")
-
+        self._set(f"Rotating {label}...")
         def _work():
             self._app.servo.rotate_dispenser(index)
-
-            def _done():
-                self._set_status(f"{label} OK ✓")
-                btn.config(state="normal", bg=PRIMARY)
-            self._app.after(0, _done)
-
+            self._app.after(0, lambda: (
+                self._set(f"{label} OK ✓"),
+                btn.config(state="normal", bg=PRIMARY),
+            ))
         threading.Thread(target=_work, daemon=True).start()
 
-    def _test_servo1(self): self._run_servo_test(self._s1_btn, "Servo 1", 0)
-    def _test_servo2(self): self._run_servo_test(self._s2_btn, "Servo 2", 1)
-
-    def _register_info(self):
-        self._app.show("RegisterFacePage")
+    def _test_servo1(self): self._servo_test(self._s1_btn, "Servo 1", 0)
+    def _test_servo2(self): self._servo_test(self._s2_btn, "Servo 2", 1)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -287,21 +254,16 @@ class CallingScreen(tk.Frame):
     def __init__(self, app):
         super().__init__(app, bg=BG)
         self._app = app
-
-        _cancel_btn(self, lambda: app.show("MainScreen"))
+        _header(self, "💊  Medication Ready", lambda: app.show("MainScreen"))
 
         self._msg_var = tk.StringVar()
         tk.Label(self, textvariable=self._msg_var,
                  font=F_H2, fg=TEXT, bg=BG,
                  wraplength=680, justify="center").pack(expand=True)
 
-        tk.Button(
-            self, text="Ready to Collect",
-            font=F_BTN, bg=PRIMARY, fg=TEXT,
-            activebackground=PRIMARY, activeforeground=TEXT,
-            width=20, height=3, relief="raised", bd=4,
-            command=lambda: app.show("FaceVerifyScreen"),
-        ).pack(pady=(0, 60))
+        _btn(self, "Ready to Collect",
+             lambda: app.show("FaceVerifyScreen"),
+             width=20, height=2).pack(pady=(0, 40))
 
     def on_show(self):
         name = self._app.current_patient["name"]
@@ -314,50 +276,46 @@ class CallingScreen(tk.Frame):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class FaceVerifyScreen(tk.Frame):
-    _FEED_W       = 400   # display width of camera feed (pixels)
-    _FEED_H       = 300   # display height of camera feed (pixels)
-    _MAX_ATTEMPTS = 5     # failed face-match frames before giving up
+    _FEED_W       = 360
+    _FEED_H       = 258
+    _MAX_ATTEMPTS = 5
 
     def __init__(self, app):
         super().__init__(app, bg=BG)
-        self._app       = app
-        self._stop_feed = threading.Event()
+        self._app          = app
+        self._stop_feed    = threading.Event()
+        self._cancel_widget = None
 
-        self._cancel_btn = _cancel_btn(self, self._cancel)
+        _, self._cancel_widget = _header(
+            self, "👤  Face Verification", self._cancel)
 
         tk.Label(self, text="Please look at the camera.",
-                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(10, 6))
+                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=(8, 4))
 
-        # Live camera feed displayed here
         self._feed_lbl = tk.Label(self, bg="#000000")
         self._feed_lbl.pack()
 
         self._status_var = tk.StringVar(value="")
         self._status_lbl = tk.Label(self, textvariable=self._status_var,
                                     font=F_BODY, fg=TEXT, bg=BG)
-        self._status_lbl.pack(pady=8)
+        self._status_lbl.pack(pady=6)
 
-        # Shown only on verification failure
-        self._return_btn = tk.Button(
-            self, text="Return to Main",
-            font=F_BTN, bg=DISABLED, fg=TEXT,
-            activebackground=DISABLED, activeforeground=TEXT,
-            width=18, height=3, relief="raised", bd=4,
-            command=lambda: app.show("MainScreen"),
-        )
+        self._return_btn = _btn(
+            self, "Return to Main",
+            lambda: app.show("MainScreen"),
+            bg=DISABLED, width=16, height=2)
 
     def on_show(self):
-        self._stop_feed.set()    # stop any previous loop
-        self._stop_feed.clear()  # arm for this session
+        self._stop_feed.set()
+        self._stop_feed.clear()
         self.configure(bg=BG)
         self._status_lbl.configure(bg=BG, fg=TEXT)
         self._status_var.set("Scanning...")
         self._return_btn.pack_forget()
-        self._cancel_btn.place(x=12, y=12)
+        if self._cancel_widget:
+            self._cancel_widget.config(state="normal", bg=DANGER)
         speak("Performing facial recognition. Please look at the camera.")
         threading.Thread(target=self._camera_loop, daemon=True).start()
-
-    # ── Camera loop (background thread) ──────────────────────────────────────
 
     def _camera_loop(self):
         if not _FR_AVAILABLE:
@@ -375,54 +333,41 @@ class FaceVerifyScreen(tk.Frame):
             if not ret:
                 break
 
-            # Resize to display dimensions
-            display = cv2.resize(frame, (self._FEED_W, self._FEED_H))
-            rgb     = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
-
-            # Detect and encode at half scale for speed; scale coords back up
+            display   = cv2.resize(frame, (self._FEED_W, self._FEED_H))
+            rgb       = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
             small     = cv2.resize(rgb, (0, 0), fx=0.5, fy=0.5)
             locations = _fr_lib.face_locations(small)
             encodings = _fr_lib.face_encodings(small, locations)
 
             for (top, right, bottom, left), enc in zip(locations, encodings):
-                top    *= 2; right  *= 2
-                bottom *= 2; left   *= 2
-
+                top *= 2; right *= 2; bottom *= 2; left *= 2
                 matched = _fr_lib.compare_faces([ref], enc, tolerance=0.5)[0]
                 if matched:
                     verified = True
                 else:
                     face_attempts += 1
-
-                # Green = matched, red = not matched
                 color = (0, 200, 80) if matched else (220, 50, 50)
                 cv2.rectangle(rgb, (left, top), (right, bottom), color, 3)
 
-            # Push frame to the UI label
             photo = ImageTk.PhotoImage(image=Image.fromarray(rgb))
             self._app.after(0, lambda p=photo: self._update_feed(p))
 
             if verified:
-                time.sleep(0.8)  # hold the green frame briefly before advancing
+                time.sleep(0.8)
                 break
-
             if face_attempts >= self._MAX_ATTEMPTS:
                 break
-
-            time.sleep(0.04)  # ~25 fps
+            time.sleep(0.04)
 
         cap.release()
-
-        # Only fire result if the user didn't cancel
         if not self._stop_feed.is_set():
             self._app.after(0, lambda: self._on_result(verified))
 
     def _update_feed(self, photo):
         self._feed_lbl.configure(image=photo)
-        self._feed_lbl.image = photo  # prevent garbage collection
+        self._feed_lbl.image = photo
 
-    def _on_result(self, verified: bool):
-        # Clear the camera feed
+    def _on_result(self, verified):
         self._feed_lbl.configure(image="")
         self._feed_lbl.image = None
 
@@ -434,11 +379,13 @@ class FaceVerifyScreen(tk.Frame):
             self.after(1000, lambda: self._app.show("DispensingScreen"))
         else:
             self.configure(bg=DANGER)
-            self._status_lbl.configure(bg=DANGER)
-            self._status_var.set("Verification failed. Please call for assistance.")
+            self._status_lbl.configure(bg=DANGER, fg=TEXT_LT)
+            self._status_var.set(
+                "Verification failed. Please call for assistance.")
             speak("Verification failed. Please call for assistance.")
-            self._cancel_btn.place_forget()
-            self._return_btn.pack(pady=20)
+            if self._cancel_widget:
+                self._cancel_widget.config(state="disabled", bg=DISABLED)
+            self._return_btn.pack(pady=12)
 
     def _cancel(self):
         self._stop_feed.set()
@@ -454,14 +401,16 @@ class DispensingScreen(tk.Frame):
         super().__init__(app, bg=BG)
         self._app = app
 
+        _header(self, "⚙  Dispensing Medication")
+
         tk.Label(self, text="Dispensing your medication.",
-                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(80, 8))
+                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(44, 6))
         tk.Label(self, text="Please wait.",
                  font=F_BODY, fg=TEXT, bg=BG).pack()
 
         self._progress_var = tk.StringVar()
         tk.Label(self, textvariable=self._progress_var,
-                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=16)
+                 font=F_BODY, fg=PRIMARY, bg=BG).pack(pady=14)
 
     def on_show(self):
         self._progress_var.set("")
@@ -470,15 +419,11 @@ class DispensingScreen(tk.Frame):
         threading.Thread(target=self._dispense, daemon=True).start()
 
     def _dispense(self):
-        steps = [
-            ("Dispensing 1 of 2...", 0),
-            ("Dispensing 2 of 2...", 1),
-        ]
-        for label, index in steps:
+        for label, index in [("Dispensing 1 of 2...", 0),
+                              ("Dispensing 2 of 2...", 1)]:
             self._app.after(0, lambda l=label: self._progress_var.set(l))
             self._app.servo.rotate_dispenser(index)
             time.sleep(1.5)
-
         self._app.after(0, self._done)
 
     def _done(self):
@@ -495,42 +440,35 @@ class CollectionScreen(tk.Frame):
         super().__init__(app, bg=BG)
         self._app = app
 
-        _cancel_btn(self, lambda: app.show("MainScreen"))
+        _header(self, "💊  Collect Your Medication",
+                lambda: app.show("MainScreen"))
 
         tk.Label(self,
-                 text="Please collect your medication\nfrom the tray.",
-                 font=F_H2, fg=TEXT, bg=BG,
-                 justify="center").pack(pady=(28, 12))
+                 text="Please collect your medication from the tray.",
+                 font=F_BODY, fg=TEXT, bg=BG,
+                 wraplength=700, justify="center").pack(pady=(12, 6))
 
-        reminders = tk.Frame(self, bg=BG)
-        reminders.pack(pady=4)
-        for line in (
-            "💊  Please take the medication after eating.",
-        ):
-            tk.Label(reminders, text=line,
-                     font=("Arial", 22), fg=TEXT, bg=BG,
-                     anchor="w").pack(fill="x", pady=2)
+        # Reminder card
+        card = tk.Frame(self, bg=CARD,
+                        highlightbackground=PRIMARY, highlightthickness=1)
+        card.pack(padx=70, pady=4, fill="x")
+        for line in ("💊  Take with food or milk",
+                     "💧  Take with a full glass of water",
+                     "⏰  Take at the same time each day"):
+            tk.Label(card, text=line, font=("Helvetica", 15),
+                     fg=TEXT, bg=CARD, anchor="w").pack(
+                fill="x", padx=14, pady=3)
 
         btns = tk.Frame(self, bg=BG)
-        btns.pack(pady=12)
+        btns.pack(pady=8)
 
-        tk.Button(
-            btns,
-            text="✓  I have received the correct medication",
-            font=F_BTN, bg=SUCCESS, fg=TEXT,
-            activebackground=SUCCESS, activeforeground=TEXT,
-            width=30, height=3, relief="raised", bd=4,
-            command=lambda: app.show("SuccessScreen"),
-        ).pack(pady=5)
+        _btn(btns, "✓  I have received the correct medication",
+             lambda: app.show("SuccessScreen"),
+             bg=SUCCESS, width=28, height=2).pack(pady=4)
 
-        tk.Button(
-            btns,
-            text="✗  Something looks wrong",
-            font=F_BTN, bg=DANGER, fg=TEXT,
-            activebackground=DANGER, activeforeground=TEXT,
-            width=30, height=3, relief="raised", bd=4,
-            command=lambda: app.show("AssistanceScreen"),
-        ).pack(pady=5)
+        _btn(btns, "✗  Something looks wrong",
+             lambda: app.show("AssistanceScreen"),
+             bg=DANGER, width=28, height=2).pack(pady=4)
 
     def on_show(self):
         speak("Please collect your medication from the tray.")
@@ -546,13 +484,13 @@ class SuccessScreen(tk.Frame):
         self._app     = app
         self._msg_var = tk.StringVar()
         tk.Label(self, textvariable=self._msg_var,
-                 font=F_H1, fg=TEXT, bg=SUCCESS,
+                 font=F_H1, fg=TEXT_LT, bg=SUCCESS,
                  justify="center").pack(expand=True)
 
     def on_show(self):
         patient = self._app.current_patient
         name    = patient["name"] if patient else "Patient"
-        self._msg_var.set(f"Thank you, {name}.\nTake care!")
+        self._msg_var.set(f"✓  Thank you, {name}.\nTake care!")
         speak("Thank you. Please take your medication as directed.")
         self.after(3000, lambda: self._app.show("MainScreen"))
 
@@ -563,21 +501,17 @@ class SuccessScreen(tk.Frame):
 
 class AssistanceScreen(tk.Frame):
     def __init__(self, app):
-        super().__init__(app, bg=DANGER)
+        super().__init__(app, bg=PINK_LT)
         self._app = app
 
-        tk.Label(self,
-                 text="A carer has been notified.\nPlease wait.",
-                 font=F_H1, fg=TEXT, bg=DANGER,
+        tk.Label(self, text="⚠  A carer has been notified.\nPlease wait.",
+                 font=F_H1, fg=DANGER, bg=PINK_LT,
                  justify="center").pack(expand=True)
 
-        tk.Button(
-            self, text="Return to Main",
-            font=F_BTN, bg="#2c2c2c", fg=TEXT,
-            activebackground="#2c2c2c", activeforeground=TEXT,
-            width=18, height=3, relief="raised", bd=4,
-            command=lambda: app.show("MainScreen"),
-        ).pack(pady=(0, 40))
+        _btn(self, "Return to Main",
+             lambda: app.show("MainScreen"),
+             bg=HDR_BG, fg=TEXT_LT, width=18, height=2,
+             ).pack(pady=(0, 36))
 
     def on_show(self):
         speak("Please wait. A carer has been notified.")
@@ -596,22 +530,17 @@ class AssistanceScreen(tk.Frame):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class RegisterFacePage(tk.Frame):
-    """
-    Manage face encodings for patients 2–5.
-    Patient 1 (Asshmar) is protected and excluded from this screen.
-    """
-    _PROTECTED_ID = 1  # Asshmar – cannot be cleared here
+    _PROTECTED_ID = 1   # Asshmar — never cleared from here
 
     def __init__(self, app):
         super().__init__(app, bg=BG)
         self._app  = app
-        self._rows = {}   # patient_id → {status_var, status_lbl, clear_btn, add_btn, patient}
+        self._rows = {}
 
-        tk.Label(self, text="Manage Patient Faces",
-                 font=F_H2, fg=TEXT, bg=BG).pack(pady=(16, 8))
+        _header(self, "📷  Manage Patient Faces")
 
         rows_frame = tk.Frame(self, bg=BG)
-        rows_frame.pack(fill="x", padx=50, pady=2)
+        rows_frame.pack(fill="x", padx=40, pady=8)
 
         for patient in PATIENTS:
             if patient["id"] == self._PROTECTED_ID:
@@ -620,18 +549,13 @@ class RegisterFacePage(tk.Frame):
 
         self._status_var = tk.StringVar(value="")
         tk.Label(self, textvariable=self._status_var,
-                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=10)
+                 font=F_BODY, fg=TEXT, bg=BG).pack(pady=6)
 
-        tk.Button(
-            self, text="← Back to Maintenance",
-            font=F_BTN, bg=DANGER, fg=TEXT,
-            activebackground=DANGER, activeforeground=TEXT,
-            width=22, height=2, relief="raised", bd=4,
-            command=lambda: app.show("MaintenanceScreen"),
-        ).pack(pady=4)
+        _btn(self, "← Back to Maintenance",
+             lambda: app.show("MaintenanceScreen"),
+             bg=DANGER, width=22, height=2).pack(pady=4)
 
     def on_show(self):
-        """Refresh row status indicators each time the page is raised."""
         self._status_var.set("")
         for pid, row in self._rows.items():
             patient  = row["patient"]
@@ -641,47 +565,37 @@ class RegisterFacePage(tk.Frame):
             row["status_lbl"].config(fg=SUCCESS if has_face else DISABLED)
             row["clear_btn"].config(
                 state="normal" if has_face else "disabled",
-                bg=DANGER if has_face else DISABLED,
-            )
-
-    # ── Row builder ───────────────────────────────────────────────────────────
+                bg=DANGER if has_face else DISABLED)
 
     def _build_row(self, parent, patient):
         pid      = patient["id"]
-        has_face = bool(patient["encoding"] and os.path.exists(patient["encoding"]))
+        has_face = bool(patient["encoding"] and
+                        os.path.exists(patient["encoding"]))
 
         row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", pady=5)
+        row.pack(fill="x", pady=4)
 
-        tk.Label(row, text=patient["name"],
-                 font=F_BODY, fg=TEXT, bg=BG,
-                 width=12, anchor="w").pack(side="left", padx=(0, 10))
+        tk.Label(row, text=patient["name"], font=F_BODY,
+                 fg=TEXT, bg=BG, width=12, anchor="w").pack(side="left")
 
-        status_var = tk.StringVar(value="✓ Registered" if has_face else "Not registered")
+        status_var = tk.StringVar(
+            value="✓ Registered" if has_face else "Not registered")
         status_lbl = tk.Label(row, textvariable=status_var,
                                font=F_BODY,
                                fg=SUCCESS if has_face else DISABLED,
-                               bg=BG, width=15, anchor="w")
-        status_lbl.pack(side="left", padx=(0, 10))
+                               bg=BG, width=14, anchor="w")
+        status_lbl.pack(side="left", padx=(6, 10))
 
-        add_btn = tk.Button(
-            row, text="Capture Face",
-            font=("Arial", 16, "bold"), bg=PRIMARY, fg=TEXT,
-            activebackground=PRIMARY, activeforeground=TEXT,
-            width=14, height=2, relief="raised", bd=3,
-            command=lambda p=pid: self._capture_face(p),
-        )
-        add_btn.pack(side="left", padx=(0, 8))
+        add_btn = _btn(row, "Capture Face",
+                       lambda p=pid: self._capture_face(p),
+                       width=13, height=2, font=F_MAINT)
+        add_btn.pack(side="left", padx=(0, 6))
 
-        clear_btn = tk.Button(
-            row, text="Clear Face",
-            font=("Arial", 16, "bold"),
-            bg=DANGER if has_face else DISABLED, fg=TEXT,
-            activebackground=DANGER, activeforeground=TEXT,
-            width=12, height=2, relief="raised", bd=3,
-            state="normal" if has_face else "disabled",
-            command=lambda p=pid: self._clear_face(p),
-        )
+        clear_btn = _btn(row, "Clear Face",
+                         lambda p=pid: self._clear_face(p),
+                         bg=DANGER if has_face else DISABLED,
+                         width=11, height=2, font=F_MAINT)
+        clear_btn.config(state="normal" if has_face else "disabled")
         clear_btn.pack(side="left")
 
         self._rows[pid] = {
@@ -692,23 +606,19 @@ class RegisterFacePage(tk.Frame):
             "clear_btn":  clear_btn,
         }
 
-    # ── Actions ───────────────────────────────────────────────────────────────
-
     def _capture_face(self, pid):
         row     = self._rows[pid]
         patient = row["patient"]
-
         row["add_btn"].config(state="disabled", bg=DISABLED)
         self._status_var.set(
-            f"Capturing face for {patient['name']} — look at the camera...")
+            f"Capturing {patient['name']} — look at the camera...")
 
         def _work():
             save_path = _patient_enc_path(patient)
             success   = False
-
             if _FR_AVAILABLE:
                 cap = cv2.VideoCapture(CAMERA_INDEX)
-                for _ in range(15):          # try up to 15 frames
+                for _ in range(15):
                     ret, frame = cap.read()
                     if not ret:
                         continue
@@ -721,7 +631,6 @@ class RegisterFacePage(tk.Frame):
                         success = True
                         break
                 cap.release()
-
             self._app.after(0, lambda: self._on_capture_done(pid, success))
 
         threading.Thread(target=_work, daemon=True).start()
@@ -736,17 +645,16 @@ class RegisterFacePage(tk.Frame):
             self._status_var.set(
                 f"✓ Face registered for {row['patient']['name']}.")
         else:
-            self._status_var.set("✗ No face detected — check lighting and try again.")
+            self._status_var.set(
+                "✗ No face detected — check lighting and try again.")
 
     def _clear_face(self, pid):
         row     = self._rows[pid]
         patient = row["patient"]
         path    = patient["encoding"]
-
         if path and os.path.exists(path):
             os.remove(path)
         patient["encoding"] = None
-
         row["status_var"].set("Not registered")
         row["status_lbl"].config(fg=DISABLED)
         row["clear_btn"].config(state="disabled", bg=DISABLED)
@@ -755,7 +663,7 @@ class RegisterFacePage(tk.Frame):
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  APP ROOT
-# ══════════���═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 class App(tk.Tk):
     _SCREENS = (
