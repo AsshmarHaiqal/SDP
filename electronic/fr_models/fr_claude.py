@@ -9,7 +9,13 @@ import os
 import socket
 import time
 
-import anthropic
+try:
+    import anthropic
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    _ANTHROPIC_AVAILABLE = False
+    print("WARNING: anthropic not installed")
+
 import cv2
 import numpy as np
 
@@ -34,7 +40,7 @@ class ClaudeFaceRecognition(FaceRecognitionBase):
         self.faces_dir    = faces_dir
         self.camera_index = camera_index
         self.model        = model
-        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if _ANTHROPIC_AVAILABLE else None
         os.makedirs(faces_dir, exist_ok=True)
 
     # ── Enrollment ────────────────────────────────────────────────────
