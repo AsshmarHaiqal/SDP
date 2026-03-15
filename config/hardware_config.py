@@ -18,14 +18,14 @@ ROTATION_DELAY = 0.5   # seconds between rotations
 
 # ── PCA9685 / ServoKit ───────────────────────────────────────────────────────
 # The PCA9685 exposes 16 PWM channels (0–15).
-# Channels 0–13 are automatically mapped 1-to-1 to dispenser slots 1–14.
+# Channels 0–13 are automatically mapped 1-to-1 to dispenser slots 1–13.
 # Channels 14–15 are reserved for auxiliary / special-purpose servos.
 
 SERVO_KIT_CHANNELS = 16        # total channels on PCA9685 board
 SERVO_FREQUENCY    = 50        # Hz (standard for hobby servos)
 
-DISPENSER_COUNT          = 14                    # number of dispenser slots
-DISPENSER_CHANNELS       = list(range(14))       # [0, 1, ..., 13]
+DISPENSER_COUNT          = 13                    # number of dispenser slots
+DISPENSER_CHANNELS       = list(range(13))       # [0, 1, ..., 12]
 
 SPECIAL_SERVO_CHANNELS   = [14, 15]              # reserved auxiliary channels
 SPECIAL_SERVO_LABEL      = {14: "camera_control", 15: "tray_tilt"}
@@ -54,13 +54,12 @@ CAMERA_SETTLE_DELAY  = 1.0   # seconds — wait after repositioning for image to
 PILL_SETTLE_DELAY      = 3.0  # seconds — wait for pill to settle on tray after release
 MAX_DISPENSE_ATTEMPTS  = 5    # retries per pill before halting the session
 
-# Tray tilt
-TRAY_TILT_ANGLE    = 30   # degrees — tilt angle to funnel pills into cup
-TRAY_TILT_DURATION = 3.0  # seconds — hold tilt before capturing post-tilt image
-MAX_TILT_ATTEMPTS  = 3    # retries before staff alert
-
 # User confirmation
 CONFIRM_TIMEOUT = 10  # seconds — wait for resident confirmation before flagging timeout
 
 # Audit image storage
 AUDIT_IMAGE_DIR = "audit_images"  # directory for dispensing audit photos
+
+# ── Claude Vision API ─────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY = "sk-ant-..."
+CLAUDE_MODEL      = "claude-haiku-4-5-20251001"

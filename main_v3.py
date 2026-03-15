@@ -189,7 +189,6 @@ class MaintenanceScreen(tk.Frame):
         self._app = app
 
         _header(self, "⚙  Maintenance")
-
         grid = tk.Frame(self, bg=BG)
         grid.pack(pady=16)
 
