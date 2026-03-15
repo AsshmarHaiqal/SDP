@@ -593,6 +593,9 @@ class PillWheelApp:
 
     def _identify_thread(self, frame: np.ndarray) -> None:
         """Run FacialRecognition.identify() — slow, must stay off the UI thread."""
+        # Return camera to tray position while Claude processes the frame
+        if _FACE_TRACKING:
+            _ft.set_servo_angle(_ft.DEFAULT_ANGLE_CAMERA)
         name = self.fr.identify(frame=frame)
         if name:
             patient = get_patient_by_name(name)
