@@ -193,8 +193,12 @@ Respond ONLY with this JSON, nothing else:
             )
 
             raw = response.content[0].text.strip() if response.content else ""
-            print(f"  Claude raw response: {repr(raw)}")
-            print(f"  Stop reason: {response.stop_reason}")
+            # Strip markdown code fences if Claude wraps the JSON
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.strip()
             parsed = json.loads(raw)
 
             print(f"  Claude: match={parsed['match']} "
@@ -209,8 +213,7 @@ Respond ONLY with this JSON, nothing else:
             return bool(parsed["match"])
 
         except json.JSONDecodeError as e:
-            print(f"Claude returned invalid JSON: {e}")
-            print(f"  Raw was: {repr(raw)}")
+            print(f"Claude returned invalid JSON: {e} — raw: {repr(raw)}")
             return False
         except anthropic.APIError as e:
             print(f"Claude API error: {e}")
