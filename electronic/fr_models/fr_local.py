@@ -29,6 +29,9 @@ class LocalFaceRecognition(FaceRecognitionBase):
     # ── Enrollment ────────────────────────────────────────────────────
 
     def enroll(self, name: str, image_path: str = None) -> bool:
+        if not _FR_AVAILABLE:
+            print(f"Enroll skipped for {name}: face_recognition library not installed")
+            return False
         if image_path:
             image = face_recognition.load_image_file(image_path)
         else:
@@ -116,6 +119,8 @@ class LocalFaceRecognition(FaceRecognitionBase):
     # ── Internal ──────────────────────────────────────────────────────
 
     def _save_encoding(self, name: str, rgb_image) -> bool:
+        if not _FR_AVAILABLE:
+            return False
         encodings = face_recognition.face_encodings(rgb_image)
         if not encodings:
             print(f"No face detected in image for {name}")
