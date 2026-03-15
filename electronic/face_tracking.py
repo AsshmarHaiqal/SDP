@@ -103,4 +103,5 @@ def track_face():
     cap.release()
     cv2.destroyAllWindows()
 
-track_face()
+if __name__ == "__main__":
+    track_face()

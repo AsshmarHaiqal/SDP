@@ -495,13 +495,20 @@ class PillWheelApp:
 
     def _face_scan_via_ft(self) -> None:
         """
-        Use face_tracking.scan_for_face() — controls servo 14 via _ft.kit
-        and reads frames from _ft.cap.
-        scan_for_face(angle) sweeps downward from `angle` to 0 and returns
-        (face_rect, frame, final_angle) or (None, None, final_angle).
-        Retry the full sweep until SCAN_TIMEOUT expires.
+        Face scan using face_tracking's servo (channel 14 via _ft.kit) and
+        Haar cascade, reading from _ft.cap.
+
+        The camera loop is paused first so scan_for_face() has exclusive access
+        to _ft.cap — concurrent reads from two threads cause ret=False which
+        breaks the servo sweep immediately.
+        After the scan the camera loop is restarted for the dispensing feed.
         """
+        # Give exclusive cap access to scan_for_face
+        self._feed_active = False
+        time.sleep(0.12)   # let the camera loop thread exit
+
         deadline = time.time() + self.SCAN_TIMEOUT
+        locked: np.ndarray | None = None
 
         while time.time() < deadline:
             if self._stop_flag.is_set():
@@ -512,13 +519,18 @@ class PillWheelApp:
             if face is not None and frame is not None:
                 self._latest_frame = frame.copy()
                 locked = frame.copy()
-                self.root.after(0, lambda f=locked: self._on_face_detected(f))
-                return
+                break
 
-            # Full sweep done with no face — wait briefly then try again
-            time.sleep(0.5)
+            # Full sweep with no face — pause briefly then retry
+            time.sleep(0.3)
 
-        self.root.after(0, self._on_face_timeout)
+        # Restart camera loop for the dispensing live feed
+        self._start_camera_loop()
+
+        if locked is not None:
+            self.root.after(0, lambda f=locked: self._on_face_detected(f))
+        else:
+            self.root.after(0, self._on_face_timeout)
 
     def _face_scan_inline(self) -> None:
         """
