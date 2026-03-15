@@ -1,195 +1,112 @@
 """
 electronic/facial_recognition.py
-Facial verification for PillWheel access control.
+PillWheel facial recognition — switch models via FR_MODEL constant.
 
-Enrol from an image file:
-    python -c "from electronic.facial_recognition import enroll_from_image; enroll_from_image('alice', 'alice.jpg')"
+Usage:
+    from electronic.facial_recognition import FacialRecognition
 
-Enrol from camera:
-    python -c "from electronic.facial_recognition import enroll_face; enroll_face('alice')"
-
-Verify with live display:
-    python -c "from electronic.facial_recognition import verify_access_live; print(verify_access_live('alice'))"
-
-Dependencies:
-    pip install face_recognition opencv-python numpy
+    fr = FacialRecognition()
+    fr.enroll("alice", "alice.jpg")
+    fr.verify_live("alice")
 """
 
 import os
-import time
+from electronic.fr_models import LocalFaceRecognition, ClaudeFaceRecognition, EnhancedFaceRecognition
 
-import cv2
-import numpy as np
-
-try:
-    import face_recognition
-    _FR_AVAILABLE = True
-except ImportError:
-    _FR_AVAILABLE = False
-
-_FACES_DIR   = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "faces")
-
-# Camera index – run list_cameras() to find the right index on your machine.
-CAMERA_INDEX = 1
+# ════════════════════════════════════════════════════════════════════
+#  SWITCH MODEL HERE
+#  1 = Local face_recognition (dlib)  — Pi 3, no internet needed
+#  2 = Claude Vision API              — requires internet
+#  3 = Enhanced InsightFace/ArcFace   — Pi 5, not yet implemented
+# ════════════════════════════════════════════════════════════════════
+FR_MODEL = 1
 
 
-# ── Enrolment ────────────────────────────────────────────────────────────────
-
-def enroll_face(name: str) -> bool:
-    """Capture a face from the camera and save it under the given name."""
-    image = _capture_frame()
-    if image is None:
-        return False
-    return _save_encoding(name, image)
+# ── Config ────────────────────────────────────────────────────────────────────
+_BASE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_FACES_DIR    = os.path.join(_BASE_DIR, "faces")
+CAMERA_INDEX  = 0
+CLAUDE_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "your-key-here")
+CLAUDE_MODEL   = "claude-haiku-4-5-20251001"
 
 
-def enroll_from_image(name: str, image_path: str) -> bool:
+class FacialRecognition:
     """
-    Load a JPG/PNG and save the face encoding under the given name.
-    Place your image file anywhere and pass the path.
+    Main facial recognition interface.
+    Delegates to whichever model is selected via FR_MODEL.
 
-    enroll_from_image("alice", "alice.jpg")
+    Switching models:
+        Change FR_MODEL = 1 / 2 / 3 at the top of this file.
     """
-    image = face_recognition.load_image_file(image_path)  # returns RGB array
-    return _save_encoding(name, image)
 
+    def __init__(self):
+        self._model = self._load_model()
+        print(f"FacialRecognition ready — Model {FR_MODEL}: {type(self._model).__name__}")
 
-# ── Verification ─────────────────────────────────────────────────────────────
+    def _load_model(self):
+        if FR_MODEL == 1:
+            return LocalFaceRecognition(
+                faces_dir=_FACES_DIR,
+                camera_index=CAMERA_INDEX
+            )
+        elif FR_MODEL == 2:
+            return ClaudeFaceRecognition(
+                faces_dir=_FACES_DIR,
+                api_key=CLAUDE_API_KEY,
+                camera_index=CAMERA_INDEX,
+                model=CLAUDE_MODEL
+            )
+        elif FR_MODEL == 3:
+            return EnhancedFaceRecognition(
+                faces_dir=_FACES_DIR,
+                camera_index=CAMERA_INDEX
+            )
+        else:
+            raise ValueError(f"Invalid FR_MODEL: {FR_MODEL}. Must be 1, 2, or 3.")
 
-def verify_access_live(name: str, override: bool = False) -> bool:
-    """
-    Open a live camera window.
-      - Red box   : face detected, not recognised
-      - Green box : face matches enrolled person → closes after 1 s, returns True
-    Press 'q' to quit without verifying (returns False).
-    """
-    if override:
-        return True
+    # ── Public API (same regardless of model) ─────────────────────────
 
-    if not _FR_AVAILABLE:
-        return False
+    def enroll(self, name: str, image_path: str = None) -> bool:
+        """
+        Enroll a person.
+        Pass image_path to enroll from file, or None to capture from camera.
+        """
+        print(f"Enrolling: {name}")
+        result = self._model.enroll(name, image_path)
+        print(f"Enrollment {'successful' if result else 'failed'}: {name}")
+        return result
 
-    reference = _load_encoding(name)
-    if reference is None:
-        return False
+    def verify(self, name: str, override: bool = False) -> bool:
+        """Silent single-shot verification. Used in main dispenser flow."""
+        print(f"Verifying: {name}")
+        result = self._model.verify(name, override)
+        print(f"Verification {'passed' if result else 'failed'}: {name}")
+        return result
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    verified = False
-    verified_at = None
+    def verify_live(self, name: str, override: bool = False) -> bool:
+        """Live camera verification with visual display."""
+        return self._model.verify_live(name, override)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    def list_enrolled(self) -> list:
+        """Return all enrolled names."""
+        return self._model.list_enrolled()
 
-        # Process at half resolution for speed; scale locations back up
-        small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-
-        locations = face_recognition.face_locations(rgb)
-        encodings = face_recognition.face_encodings(rgb, locations)
-
-        for (top, right, bottom, left), encoding in zip(locations, encodings):
-            top    *= 2; right  *= 2
-            bottom *= 2; left   *= 2
-
-            match = face_recognition.compare_faces([reference], encoding)[0]
-
-            if match:
-                color = (0, 255, 0)   # green
-                label = "Verified"
-                if not verified:
-                    verified    = True
-                    verified_at = time.time()
-            else:
-                color = (0, 0, 255)   # red
-                label = "Unknown"
-
-            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-            cv2.putText(frame, label, (left, top - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-
-        cv2.imshow("PillWheel - Face Verification", frame)
-
-        # Hold green frame for 1 second then close
-        if verified and time.time() - verified_at >= 1.0:
-            break
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-    return verified
-
-
-def verify_access(name: str, override: bool = False) -> bool:
-    """Silent single-shot verification (no display). Used in production logic."""
-    if override:
-        return True
-
-    if not _FR_AVAILABLE:
-        return False
-
-    image = _capture_frame()
-    if image is None:
-        return False
-
-    encodings = face_recognition.face_encodings(image)
-    person_encoding = encodings[0] if encodings else None
-
-    return facial_verification(person_encoding, _load_encoding(name))
-
-
-def facial_verification(person_encoding, reference_encoding) -> bool:
-    """Compare captured encoding against a stored reference."""
-    if person_encoding is None or reference_encoding is None:
-        return False
-    return bool(face_recognition.compare_faces([reference_encoding], person_encoding)[0])
-
-
-# ── Utilities ─────────────────────────────────────────────────────────────────
-
-def list_enrolled() -> list:
-    """Return names of all enrolled people."""
-    if not os.path.exists(_FACES_DIR):
-        return []
-    return [f.replace(".npy", "") for f in os.listdir(_FACES_DIR) if f.endswith(".npy")]
-
-
-def list_cameras():
-    """Print available camera indices."""
-    for i in range(5):
-        cap = cv2.VideoCapture(i)
-        if cap.read()[0]:
-            print(f"  [{i}] camera available")
-        cap.release()
-
-
-# ── Internal helpers ──────────────────────────────────────────────────────────
-
-def _save_encoding(name: str, rgb_image) -> bool:
-    encodings = face_recognition.face_encodings(rgb_image)
-    if not encodings:
-        return False
-    os.makedirs(_FACES_DIR, exist_ok=True)
-    np.save(_encoding_path(name), encodings[0])
-    return True
-
-
-def _encoding_path(name: str) -> str:
-    return os.path.join(_FACES_DIR, f"{name}.npy")
-
-
-def _load_encoding(name: str):
-    path = _encoding_path(name)
-    return np.load(path) if os.path.exists(path) else None
-
-
-def _capture_frame():
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    ret, frame = cap.read()
-    cap.release()
-    if not ret:
+    def identify(self) -> str | None:
+        """
+        Scan all enrolled residents and return the first match.
+        Returns the resident's name, or None if no match found.
+        Note: calls verify() once per enrolled person — keep enrollment list small.
+        """
+        for name in self.list_enrolled():
+            if self.verify(name):
+                return name
         return None
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    def list_cameras(self):
+        """Helper to find correct camera index."""
+        import cv2
+        for i in range(5):
+            cap = cv2.VideoCapture(i)
+            if cap.read()[0]:
+                print(f"  [{i}] camera available")
+            cap.release()
