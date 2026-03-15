@@ -63,7 +63,7 @@ class ClaudeFaceRecognition(FaceRecognitionBase):
 
     # ── Verification ──────────────────────────────────────────────────
 
-    def verify(self, name: str, override: bool = False) -> bool:
+    def verify(self, name: str, override: bool = False, frame=None) -> bool:
         if override:
             return True
         if not _ANTHROPIC_AVAILABLE:
@@ -78,7 +78,7 @@ class ClaudeFaceRecognition(FaceRecognitionBase):
             print(f"No enrollment found for: {name}")
             return False
 
-        live_frame = self._capture_frame_bgr()
+        live_frame = frame if frame is not None else self._capture_frame_bgr()
         if live_frame is None:
             return False
 
@@ -232,8 +232,10 @@ Respond ONLY with this JSON, nothing else:
 
     def _has_internet(self) -> bool:
         try:
-            socket.setdefaulttimeout(2)
-            socket.connect(("8.8.8.8", 53))
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 53))
+            s.close()
             return True
         except OSError:
             return False

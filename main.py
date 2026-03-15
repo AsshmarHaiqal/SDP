@@ -591,9 +591,9 @@ class PillWheelApp:
     #  Dispense flow — Step 3: Identity check (background thread)
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _identify_thread(self, _frame: np.ndarray) -> None:
+    def _identify_thread(self, frame: np.ndarray) -> None:
         """Run FacialRecognition.identify() — slow, must stay off the UI thread."""
-        name = self.fr.identify()
+        name = self.fr.identify(frame=frame)
         if name:
             patient = get_patient_by_name(name)
             if patient:

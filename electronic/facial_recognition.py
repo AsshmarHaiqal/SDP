@@ -19,7 +19,7 @@ from electronic.fr_models import LocalFaceRecognition, ClaudeFaceRecognition, En
 #  2 = Claude Vision API              — requires internet
 #  3 = Enhanced InsightFace/ArcFace   — Pi 5, not yet implemented
 # ════════════════════════════════════════════════════════════════════
-FR_MODEL = 1
+FR_MODEL = 2
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -76,10 +76,10 @@ class FacialRecognition:
         print(f"Enrollment {'successful' if result else 'failed'}: {name}")
         return result
 
-    def verify(self, name: str, override: bool = False) -> bool:
+    def verify(self, name: str, override: bool = False, frame=None) -> bool:
         """Silent single-shot verification. Used in main dispenser flow."""
         print(f"Verifying: {name}")
-        result = self._model.verify(name, override)
+        result = self._model.verify(name, override, frame=frame)
         print(f"Verification {'passed' if result else 'failed'}: {name}")
         return result
 
@@ -91,14 +91,14 @@ class FacialRecognition:
         """Return all enrolled names."""
         return self._model.list_enrolled()
 
-    def identify(self) -> str | None:
+    def identify(self, frame=None) -> str | None:
         """
         Scan all enrolled residents and return the first match.
+        Pass frame to reuse an already-captured image (avoids extra camera access).
         Returns the resident's name, or None if no match found.
-        Note: calls verify() once per enrolled person — keep enrollment list small.
         """
         for name in self.list_enrolled():
-            if self.verify(name):
+            if self.verify(name, frame=frame):
                 return name
         return None
 
