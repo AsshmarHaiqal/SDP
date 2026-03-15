@@ -11,6 +11,7 @@ MAX_ANGLE = 180
 SCAN_STEP = 5
 TRACK_STEP = 3
 FRAME_CENTER_TOLERANCE = 30 #pixels
+MIN_FACE_AREA = 6000  # ~78x78px — reject faces that are too far/small
 
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
@@ -24,6 +25,9 @@ def set_servo_angle(angle):
 def scan_for_face(current_angle):
     angle = current_angle
     while angle >= MIN_ANGLE:
+        angle = set_servo_angle(angle - SCAN_STEP)
+        time.sleep(0.35)   # let servo settle before reading
+
         ret, frame = cap.read()
         if not ret:
             break
@@ -31,12 +35,20 @@ def scan_for_face(current_angle):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-        if len(faces) > 0:
-            #print(f"Face found at angle {angle}")
-            return faces[0], frame, angle
-        
-        angle = set_servo_angle(angle- SCAN_STEP)
-        time.sleep(0.3)
+        if len(faces) == 0:
+            continue
+
+        # Pick largest face and reject if too small (person too far)
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        if w * h < MIN_FACE_AREA:
+            continue
+
+        # Sharpness check — reject blurry frames
+        face_roi = gray[y:y+h, x:x+w]
+        if cv2.Laplacian(face_roi, cv2.CV_64F).var() < 40:
+            continue
+
+        return (x, y, w, h), frame, angle
 
     return None, None, angle
 
