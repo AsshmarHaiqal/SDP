@@ -115,7 +115,7 @@ class _PiperTTS:
                 self.voice.synthesize(text, wav_file)
 
             subprocess.run(
-                ["aplay", "-q", tmp_path],
+                ["aplay", "-q", "-D", "plughw:2,0", tmp_path],
                 check=True,
                 timeout=30
             )
