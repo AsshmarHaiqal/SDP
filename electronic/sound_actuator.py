@@ -105,23 +105,11 @@ class _PiperTTS:
             return False
         tmp_path = None
         try:
-            import wave
-            import io
-
-            # Collect raw audio bytes from Piper
-            audio_bytes = b""
-            for audio_chunk in self.voice.synthesize_stream_raw(text):
-                audio_bytes += audio_chunk
-
-            # Write a proper WAV file manually
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 tmp_path = f.name
 
-            with wave.open(tmp_path, "wb") as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(self.voice.config.sample_rate)
-                wav_file.writeframes(audio_bytes)
+            with open(tmp_path, "wb") as wav_file:
+                self.voice.synthesize_wav(text, wav_file)
 
             print(f"WAV size: {os.path.getsize(tmp_path)} bytes")
 
@@ -141,6 +129,7 @@ class _PiperTTS:
             except Exception:
                 pass
             return False
+    
 
 
 
