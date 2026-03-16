@@ -109,9 +109,11 @@ class _PiperTTS:
                 tmp_path = f.name
 
             with wave.open(tmp_path, "w") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)                    # 16-bit
+                wav_file.setframerate(self.voice.config.sample_rate)
                 self.voice.synthesize(text, wav_file)
 
-            # Play via aplay (ALSA — works on Pi headless)
             subprocess.run(
                 ["aplay", "-q", tmp_path],
                 check=True,
