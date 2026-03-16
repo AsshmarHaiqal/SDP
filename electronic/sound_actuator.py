@@ -103,16 +103,27 @@ class _PiperTTS:
     def speak(self, text: str):
         if not self._available:
             return False
+        tmp_path = None
         try:
             import wave
+            import io
+
+            # Collect raw audio bytes from Piper
+            audio_bytes = b""
+            for audio_chunk in self.voice.synthesize_stream_raw(text):
+                audio_bytes += audio_chunk
+
+            # Write a proper WAV file manually
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 tmp_path = f.name
 
-            with wave.open(tmp_path, "w") as wav_file:
+            with wave.open(tmp_path, "wb") as wav_file:
                 wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)                    # 16-bit
+                wav_file.setsampwidth(2)
                 wav_file.setframerate(self.voice.config.sample_rate)
-                self.voice.synthesize(text, wav_file)
+                wav_file.writeframes(audio_bytes)
+
+            print(f"WAV size: {os.path.getsize(tmp_path)} bytes")
 
             subprocess.run(
                 ["aplay", "-q", "-D", "plughw:2,0", tmp_path],
@@ -125,10 +136,12 @@ class _PiperTTS:
         except Exception as e:
             print(f"Piper speak error: {e}")
             try:
-                os.unlink(tmp_path)
+                if tmp_path:
+                    os.unlink(tmp_path)
             except Exception:
                 pass
             return False
+
 
 
 class _EdgeTTS:
