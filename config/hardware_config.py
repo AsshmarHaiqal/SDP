@@ -61,5 +61,5 @@ CONFIRM_TIMEOUT = 10  # seconds — wait for resident confirmation before flaggi
 AUDIT_IMAGE_DIR = "audit_images"  # directory for dispensing audit photos
 
 # ── Claude Vision API ─────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = "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"
+ANTHROPIC_API_KEY = 
 CLAUDE_MODEL      = "claude-haiku-4-5-20251001"
