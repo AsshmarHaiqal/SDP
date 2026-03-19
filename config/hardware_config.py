@@ -61,5 +61,6 @@ CONFIRM_TIMEOUT = 10  # seconds — wait for resident confirmation before flaggi
 AUDIT_IMAGE_DIR = "audit_images"  # directory for dispensing audit photos
 
 # ── Claude Vision API ─────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = 
+import os
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL      = "claude-haiku-4-5-20251001"
