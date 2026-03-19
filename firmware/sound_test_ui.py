@@ -8,7 +8,7 @@ A status bar shows which engine is active and what was last spoken.
 
 Usage:
     export DISPLAY=:0
-    python3 Firmware/sound_test_ui.py
+    python3 firmware/sound_test_ui.py
 """
 
 import sys

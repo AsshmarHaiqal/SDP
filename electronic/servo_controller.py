@@ -1,6 +1,6 @@
 """
 Channel allocation (PCA9685, 16 channels):
-    0–13  : Dispenser servos (slot index = channel)
+    0–12  : Dispenser servos (slot index = channel)
     14–15 : Auxiliary servos for camera and etc
 """
 
@@ -25,7 +25,7 @@ from config.hardware_config import (
 class ServoController:
     """
     Controls all PCA9685 servos.
-    Dispenser slot N uses channel N (0-based, channels 0–13).
+    Dispenser slot N uses channel N (0-based, channels 0–12).
     Channels 14–15 are auxiliary.
     """
 
