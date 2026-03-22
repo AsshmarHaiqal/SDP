@@ -9,6 +9,7 @@ audit_images/
 # Face encodings contain personal biometric data — exclude from version control
 # Enrol faces fresh on each deployment using: python -c "from electronic.facial_recognition import enroll_face; enroll_face('name')"
 #faces/*.npy
+.env
 
 # OS / editor
 .DS_Store
