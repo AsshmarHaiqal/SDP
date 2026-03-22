@@ -47,8 +47,17 @@ for _p in (_ROOT, _ELEC):
 from electronic.servo_controller import ServoController
 from electronic.pill_recogniser import PillRecogniser
 from electronic.tray_sweep import sweep as _tray_sweep
-from electronic.facial_recognition import FacialRecognition
 from electronic.sound_actuator import SoundActuator
+from api_client import APIClient
+from maintenance import launch_maintenance
+
+# ── Facial recognition mode ────────────────────────────────────────────────────
+# "server" — send frame to server; Claude Vision matches against enrolled photos
+# "local"  — download enrolled photos at startup, match on-device using FR model
+FR_MODE = os.environ.get("FR_MODE", "server").lower()   # override: export FR_MODE=local
+
+if FR_MODE == "local":
+    from electronic.facial_recognition import FacialRecognition
 
 # face_tracking.py opens VideoCapture(0) and ServoKit at module level — only
 # available on Pi with hardware. When present it owns the camera and servo 14.
@@ -61,7 +70,7 @@ except (ImportError, Exception) as _e:
     _FACE_TRACKING = False
     print(f"face_tracking not available ({_e}) — using inline fallback")
 
-from data.mock_db import get_patient_by_name, get_all_patients, log_dispense
+
 
 # ── Colours ────────────────────────────────────────────────────────────────────
 C_BG      = "#1a1a2e"
@@ -127,7 +136,16 @@ class PillWheelApp:
         self.pill_rec = PillRecogniser()
 
         self.sound = SoundActuator()
-        self.fr    = FacialRecognition()
+
+        # APIClient handles all server communication.
+        self.api = APIClient()
+
+        # ── Facial recognition ────────────────────────────────────────────────
+        # FR_MODE="server"  → frame is sent to server; Claude Vision identifies
+        # FR_MODE="local"   → faces synced from server at startup, matched on-Pi
+        self.fr: "FacialRecognition | None" = None
+        if FR_MODE == "local":
+            self._sync_and_enroll()
 
         # ── Camera ────────────────────────────────────────────────────────────
         # When face_tracking is loaded it owns VideoCapture(0) via _ft.cap.
@@ -142,25 +160,42 @@ class PillWheelApp:
         self.current_patient: dict | None = None
         self._stop_flag = threading.Event()
 
-        # Auto-enroll mock patients if not yet enrolled
-        self._auto_enroll()
-
         # Build and show UI
         self._init_fonts()
         self._build_ui()
         self._set_status("System ready")
         self.show_screen("home")
 
-    # ── Auto-enrol ─────────────────────────────────────────────────────────────
+    # ── Local FR startup sync ──────────────────────────────────────────────────
 
-    def _auto_enroll(self) -> None:
-        """Enroll each mock patient from their placeholder face image if absent."""
-        enrolled = set(self.fr.list_enrolled())
-        for patient in get_all_patients():
-            name = patient["name"]
-            if name not in enrolled and os.path.exists(patient["face_image"]):
-                print(f"Auto-enrolling: {name}")
-                self.fr.enroll(name, patient["face_image"])
+    def _sync_and_enroll(self) -> None:
+        """
+        Download all enrolled patient face images from the server, save them as
+        <patientId>.jpg in data/server_faces/, then enroll each one into the
+        local FacialRecognition model.
+
+        Filenames are patientId integers so identify() can later recover the id
+        from the matched name string.
+        """
+        faces_dir = os.path.join(_ROOT, "data", "server_faces")
+        print(f"FR_MODE=local — syncing faces from server to {faces_dir}")
+
+        saved = self.api.sync_faces_locally(faces_dir)
+        if saved == 0:
+            print("WARNING: no face images synced — local FR will find no matches")
+
+        self.fr = FacialRecognition()
+
+        # Enroll each downloaded image (name = str(patientId))
+        for fname in os.listdir(faces_dir):
+            if not fname.endswith(".jpg"):
+                continue
+            name = fname.replace(".jpg", "")   # e.g. "42"
+            path = os.path.join(faces_dir, fname)
+            print(f"Enrolling patient id={name} from {path}")
+            self.fr.enroll(name, path)
+
+        print(f"Local FR ready — {len(self.fr.list_enrolled())} patient(s) enrolled")
 
     # ── Fonts ──────────────────────────────────────────────────────────────────
 
@@ -221,9 +256,10 @@ class PillWheelApp:
         f.rowconfigure(0, weight=2)
         f.rowconfigure(1, weight=2)
         f.rowconfigure(2, weight=1)
+        f.rowconfigure(3, weight=1)
 
         tk.Label(f, text="PillWheel", bg=C_BG, fg=C_BLUE,
-                 font=self.f_title).grid(row=0, column=0, pady=(40, 0))
+                 font=self.f_title).grid(row=0, column=0, pady=(30, 0))
 
         tk.Button(
             f, text="Ready to Collect",
@@ -234,6 +270,13 @@ class PillWheelApp:
 
         tk.Label(f, text="Press to begin your medication collection",
                  bg=C_BG, fg=C_MUTED, font=self.f_small).grid(row=2, column=0)
+
+        tk.Button(
+            f, text="Maintenance",
+            bg="#2a2a4a", fg=C_MUTED, font=self.f_status,
+            relief="flat", cursor="hand2", padx=14, pady=6,
+            command=launch_maintenance,
+        ).grid(row=3, column=0, pady=(0, 10))
 
     # ── Scanning ───────────────────────────────────────────────────────────────
 
@@ -592,17 +635,63 @@ class PillWheelApp:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _identify_thread(self, frame: np.ndarray) -> None:
-        """Run FacialRecognition.identify() — slow, must stay off the UI thread."""
-        # Return camera to tray position while Claude processes the frame
+        """Identify the resident — runs off the UI thread."""
         if _FACE_TRACKING:
             _ft.set_servo_angle(_ft.DEFAULT_ANGLE_CAMERA)
-        name = self.fr.identify(frame=frame)
-        if name:
-            patient = get_patient_by_name(name)
-            if patient:
-                self.root.after(0, lambda: self._on_identified(patient))
-                return
-        self.root.after(0, lambda: self._on_identity_failed("Face not recognised"))
+
+        if FR_MODE == "local":
+            self._identify_local(frame)
+        else:
+            self._identify_server(frame)
+
+    def _identify_server(self, frame: np.ndarray) -> None:
+        """Send frame to server; server runs Claude Vision and returns patient + prescriptions."""
+        patient = self.api.identify_patient(frame)
+        if patient:
+            self.root.after(0, lambda: self._on_identified(patient))
+        else:
+            self.root.after(0, lambda: self._on_identity_failed(
+                "Face not recognised or no medication due.\n"
+                "Please see a member of staff."
+            ))
+
+    def _identify_local(self, frame: np.ndarray) -> None:
+        """
+        Match frame against locally-enrolled faces, then fetch prescriptions
+        from the server using the matched patientId.
+
+        Names stored during _sync_and_enroll() are string patientIds ("42"),
+        so converting the matched name back to int gives us the server patientId.
+        """
+        if self.fr is None:
+            self.root.after(0, lambda: self._on_identity_failed(
+                "Local FR not initialised.\nPlease see a member of staff."
+            ))
+            return
+
+        matched_name = self.fr.identify(frame=frame)
+
+        if not matched_name:
+            self.root.after(0, lambda: self._on_identity_failed(
+                "Face not recognised.\nPlease see a member of staff."
+            ))
+            return
+
+        try:
+            patient_id = int(matched_name)
+        except ValueError:
+            self.root.after(0, lambda: self._on_identity_failed(
+                "Identity error.\nPlease see a member of staff."
+            ))
+            return
+
+        patient = self.api.get_patient_prescriptions(patient_id)
+        if patient:
+            self.root.after(0, lambda: self._on_identified(patient))
+        else:
+            self.root.after(0, lambda: self._on_identity_failed(
+                "No medication due right now.\nPlease see a member of staff."
+            ))
 
     def _on_identity_failed(self, reason: str) -> None:
         self._stop_dots()
@@ -649,6 +738,9 @@ class PillWheelApp:
         med      = rx["medicine_name"]
         pid      = patient["patient_id"]
 
+        # medicine_number is 1-based (1-13); servo channel is 0-based (0-12)
+        servo_slot = rx.get("medicine_number", 1) - 1
+
         # ── 1. Wait until tray is clear ────────────────────────────────────────
         while not self._stop_flag.is_set():
             frame = self._latest_frame
@@ -667,7 +759,6 @@ class PillWheelApp:
         time.sleep(1)
 
         # ── 2. Dispense one pill at a time ─────────────────────────────────────
-        # servo.rotate_dispenser(0) → slot 0 = PCA9685 channel 0 (0→180→0)
         audit_frame: np.ndarray | None = None
 
         for i in range(expected):
@@ -675,7 +766,7 @@ class PillWheelApp:
                 return
 
             self._disp_set(f"Dispensing pill {i+1} of {expected}...")
-            self.servo.rotate_dispenser(0)
+            self.servo.rotate_dispenser(servo_slot)
             time.sleep(1.5)   # let pill settle on tray
 
             verified = False
@@ -702,6 +793,13 @@ class PillWheelApp:
 
             if not verified:
                 self.sound.error()
+                self.api.log_dispense_result(
+                    patient_id      = pid,
+                    prescription_id = rx["prescription_id"],
+                    scheduled_time  = rx.get("scheduled_time", ""),
+                    status          = "FAILED",
+                    failure_reason  = f"Pill {i+1} not confirmed after {self.MAX_PILL_RETRY} attempts",
+                )
                 idx = i + 1
                 self.root.after(
                     0,
@@ -730,8 +828,14 @@ class PillWheelApp:
         self.sound.collected()
         self.sound.speak(f"Have a lovely day, {first_name}")
 
-        # ── 5. Log and advance to Complete screen ─────────────────────────────
-        log_dispense(pid, med, expected, timestamp, audit_path)
+        # ── 5. Log to server and advance to Complete screen ───────────────────
+        self.api.log_dispense_result(
+            patient_id      = pid,
+            prescription_id = rx["prescription_id"],
+            scheduled_time  = rx.get("scheduled_time", ""),
+            status          = "TAKEN",
+        )
+        self.api.reduce_stock(med, expected)
         self.root.after(
             0, lambda: self._on_dispense_complete(patient, rx, timestamp)
         )

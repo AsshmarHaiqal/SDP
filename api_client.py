@@ -1,164 +1,272 @@
 """
-data/api_client.py
-Handles all communication between the PillWheel machine and the SDP server.
+api_client.py — PillWheel ↔ SDP server integration
+====================================================
+All machine-to-server calls go through this module.
+
+Authentication: every request carries the  X-API-KEY  header.
+The key is read from the environment variable MACHINE_API_KEY,
+falling back to the default dev key used by the server.
+
+Server base URL is read from  SERVER_URL  env-var so it can be
+overridden without touching code:
+    export SERVER_URL=http://192.168.1.50:8080
 """
 
-import requests
-import base64
+import os
+import re
 import cv2
+import numpy as np
 from datetime import datetime
 
-BASE_URL = "https://www.sdpgroup16.com/api"
+import requests
 
-# Machine logs in as root admin once at startup
-ADMIN_CREDENTIALS = {
-    "username": "root",      # update with real root credentials
-    "password": "root"
-}
+# ── Config ────────────────────────────────────────────────────────────────────
 
+BASE_URL = os.environ.get("SERVER_URL", "https://www.sdpgroup16.com").rstrip("/")
+API_KEY  = os.environ.get("MACHINE_API_KEY", "machine-123456-secure-key")
+
+_TIMEOUT_FAST = 5    # seconds — ping / stock / log
+_TIMEOUT_SLOW = 20   # seconds — identify (Claude Vision round-trip)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _parse_pill_count(dosage: str) -> int:
+    """
+    Best-effort extraction of an integer pill count from a dosage string.
+    Examples:
+        "2"          → 2
+        "2 tablets"  → 2
+        "500mg"      → 1  (no leading integer → default 1)
+        ""           → 1
+    """
+    if not dosage:
+        return 1
+    m = re.match(r"^\s*(\d+)", dosage.strip())
+    return int(m.group(1)) if m else 1
+
+
+def _frame_to_jpeg_bytes(frame: np.ndarray) -> bytes:
+    """Encode an OpenCV BGR frame to JPEG bytes."""
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return buf.tobytes()
+
+
+def _normalize_patient(data: dict) -> dict:
+    """
+    Convert the server MachineIdentifyResponse JSON into the patient dict
+    format expected by main.py:
+
+        {
+            "patient_id":   int,
+            "display_name": str,
+            "prescriptions": [
+                {
+                    "prescription_id": int,
+                    "medicine_name":   str,
+                    "medicine_code":   str,   # e.g. "VTM01"
+                    "medicine_number": int,   # 1-13 → servo channel = this - 1
+                    "dosage":          str,
+                    "pill_count":      int,   # parsed from dosage, default 1
+                    "scheduled_time":  str,   # "HH:mm:ss"
+                }
+            ]
+        }
+    """
+    prescriptions = []
+    for p in data.get("prescriptions", []):
+        prescriptions.append({
+            "prescription_id": p.get("prescriptionId"),
+            "medicine_name":   p.get("medicineName", "Unknown"),
+            "medicine_code":   p.get("medicineCode", ""),
+            "medicine_number": p.get("medicineNumber", 1),
+            "dosage":          p.get("dosage", ""),
+            "pill_count":      _parse_pill_count(p.get("dosage", "")),
+            "scheduled_time":  p.get("scheduledTime", ""),
+        })
+
+    return {
+        "patient_id":    data.get("patientId"),
+        "display_name":  data.get("patientName", "Unknown"),
+        "prescriptions": prescriptions,
+    }
+
+
+# ── APIClient ─────────────────────────────────────────────────────────────────
 
 class APIClient:
+    """
+    Thin HTTP client for the PillWheel machine.
+
+    All methods return a meaningful value on success and None / False on
+    failure — callers never need to handle exceptions.
+    """
 
     def __init__(self):
         self._session = requests.Session()
-        self._online  = False
-        self._login()
+        self._session.headers.update({"X-API-KEY": API_KEY})
+        self._online = False
+        print(f"APIClient: server = {BASE_URL}")
+        self._check_online()
 
-    # ── Auth ──────────────────────────────────────────────────────────
+    # ── Connectivity ──────────────────────────────────────────────────────────
 
-    def _login(self):
+    def _check_online(self) -> bool:
         try:
-            r = self._session.post(
-                f"{BASE_URL}/verify/login",
-                json=ADMIN_CREDENTIALS,
-                timeout=5
-            )
-            if r.ok and r.json().get("ok"):
-                self._online = True
-                print("APIClient: logged in ✔")
-            else:
-                print(f"APIClient: login failed — {r.json()}")
-        except Exception as e:
-            self._online = False
-            print(f"APIClient: server unreachable — {e}")
-
-    def is_online(self) -> bool:
-        try:
-            r = self._session.get(f"{BASE_URL}/public/ping", timeout=3)
+            r = self._session.get(f"{BASE_URL}/api/public/ping", timeout=_TIMEOUT_FAST)
             self._online = r.ok
         except Exception:
             self._online = False
+        status = "online ✔" if self._online else "OFFLINE"
+        print(f"APIClient: server {status}")
         return self._online
 
-    # ── Facial recognition ────────────────────────────────────────────
-    # Requires new endpoint on server:
-    # POST /api/facial-recognition
-    # Body: { "image": "<base64 jpg>" }
-    # Response: {
-    #   "ok": true,
-    #   "patientId": 1,
-    #   "displayName": "John Doe",
-    #   "prescriptions": [
-    #     {
-    #       "prescriptionId": 1,
-    #       "medicineId": "VTM01",
-    #       "medicineName": "Vitamin C",
-    #       "dosage": "1000mg",
-    #       "frequency": "Once daily",
-    #       "quantity": 2,
-    #       "container": 3,        ← new column your team adds
-    #       "instructions": "Take with food"
-    #     }
-    #   ],
-    #   "nextCollection": "2026-03-18T09:00:00"
-    # }
+    def is_online(self) -> bool:
+        """Quick connectivity probe (call before any operation if desired)."""
+        return self._check_online()
 
-    def identify_patient(self, frame) -> dict | None:
+    # ── Facial recognition / patient identification ───────────────────────────
+
+    def identify_patient(self, frame: np.ndarray) -> dict | None:
         """
-        Send captured frame to server for facial recognition.
-        Returns patient + prescription dict, or None if unrecognised / offline.
+        Send a captured BGR frame to the server for facial recognition.
+
+        Returns a normalised patient dict on success, or None if:
+          - the server is unreachable
+          - no face matched
+          - no prescriptions are currently due
+
+        Server endpoint:  POST /api/machine/identify  (multipart, field "image")
         """
-        if not self.is_online():
+        if not self._check_online():
+            print("APIClient: identify_patient — server offline")
             return None
-        try:
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            b64    = base64.b64encode(buf).decode("utf-8")
 
+        try:
+            jpeg = _frame_to_jpeg_bytes(frame)
             r = self._session.post(
-                f"{BASE_URL}/facial-recognition",
-                json={"image": b64},
-                timeout=15      # recognition may take a moment
+                f"{BASE_URL}/api/machine/identify",
+                files={"image": ("frame.jpg", jpeg, "image/jpeg")},
+                timeout=_TIMEOUT_SLOW,
             )
             data = r.json()
-            if r.ok and data.get("ok"):
-                return data
-            print(f"APIClient: recognition failed — {data}")
-            return None
+
+            if not r.ok:
+                print(f"APIClient: identify failed HTTP {r.status_code} — {data}")
+                return None
+
+            if not data.get("ok"):
+                print(f"APIClient: identify — server error: {data.get('message')}")
+                return None
+
+            if not data.get("matched"):
+                print("APIClient: identify — no matching patient")
+                return None
+
+            if not data.get("prescriptions"):
+                print("APIClient: identify — patient found but no prescriptions due now")
+                return None
+
+            patient = _normalize_patient(data)
+            print(f"APIClient: identified → {patient['display_name']} "
+                  f"({len(patient['prescriptions'])} prescription(s) due)")
+            return patient
 
         except Exception as e:
             print(f"APIClient: identify_patient error — {e}")
             return None
 
-    # ── Post-dispense logging ─────────────────────────────────────────
+    # ── Post-dispense logging ─────────────────────────────────────────────────
 
-    def log_intake(self, patient_id: int, medicine_id: str,
-                   quantity: int, notes: str = "") -> bool:
-        """Log a completed dispense event."""
-        if not self.is_online():
+    def log_dispense_result(
+        self,
+        patient_id: int,
+        prescription_id: int,
+        scheduled_time: str,
+        status: str = "TAKEN",
+        failure_reason: str | None = None,
+    ) -> bool:
+        """
+        Log the outcome of a dispense attempt.
+
+        status:         TAKEN | MISSED | FAILED | SKIPPED
+        scheduled_time: ISO-8601 datetime, e.g. "2026-03-21T08:00:00"
+                        If the Pi only has HH:mm:ss, today's date is prepended.
+
+        Server endpoint:  POST /api/machine/dispense-result
+        """
+        if not self._check_online():
+            print("APIClient: log_dispense_result — server offline, skipping log")
             return False
+
+        # Normalise to full ISO-8601 if only a time string was given
+        if scheduled_time and "T" not in scheduled_time:
+            today = datetime.now().strftime("%Y-%m-%d")
+            scheduled_time = f"{today}T{scheduled_time}"
+
+        payload = {
+            "patientId":      patient_id,
+            "prescriptionId": prescription_id,
+            "scheduledTime":  scheduled_time,
+            "status":         status.upper(),
+        }
+        if failure_reason:
+            payload["failureReason"] = failure_reason
+
         try:
-            now = datetime.now()
             r = self._session.post(
-                f"{BASE_URL}/patient/{patient_id}/intake",
-                json={
-                    "medicineId": medicine_id,
-                    "takenDate":  now.strftime("%Y-%m-%d"),
-                    "takenTime":  now.strftime("%H:%M"),
-                    "notes":      notes or f"Dispensed × {quantity}"
-                },
-                timeout=5
+                f"{BASE_URL}/api/machine/dispense-result",
+                json=payload,
+                timeout=_TIMEOUT_FAST,
             )
-            return r.ok
+            ok = r.ok and r.json().get("ok", False)
+            if not ok:
+                print(f"APIClient: log_dispense_result failed — {r.json()}")
+            return ok
         except Exception as e:
-            print(f"APIClient: log_intake error — {e}")
+            print(f"APIClient: log_dispense_result error — {e}")
             return False
 
     def reduce_stock(self, medicine_name: str, quantity: int) -> bool:
-        """Reduce remaining pill count in database."""
-        if not self.is_online():
+        """
+        Decrement stock for a medicine by name.
+        Server endpoint:  POST /api/medicines/reduce
+        """
+        if not self._check_online():
             return False
         try:
             r = self._session.post(
-                f"{BASE_URL}/medicines/reduce",
+                f"{BASE_URL}/api/medicines/reduce",
                 json={"medicineName": medicine_name, "quantity": quantity},
-                timeout=5
+                timeout=_TIMEOUT_FAST,
             )
             return r.ok
         except Exception as e:
             print(f"APIClient: reduce_stock error — {e}")
             return False
 
-    def upload_audit_image(self, patient_id: int,
-                           frame, timestamp: str) -> bool:
-        """
-        Upload tray image for audit log.
-        Requires new endpoint on server:
-        POST /api/patient/{patientId}/audit-image
-        Body: multipart/form-data  field: "image" (JPEG)
-              or JSON: { "image": "<base64>", "timestamp": "..." }
-        """
-        if not self.is_online():
-            return False
-        try:
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            b64    = base64.b64encode(buf).decode("utf-8")
+    # ── Startup: download enrolled face images ────────────────────────────────
 
-            r = self._session.post(
-                f"{BASE_URL}/patient/{patient_id}/audit-image",
-                json={"image": b64, "timestamp": timestamp},
-                timeout=10
+    def get_patient_images(self) -> list[dict]:
+        """
+        Fetch all enrolled face images from the server.
+        Useful for syncing a local FR cache if needed in future.
+        Server endpoint:  GET /api/machine/patient-images
+        """
+        if not self._check_online():
+            return []
+        try:
+            r = self._session.get(
+                f"{BASE_URL}/api/machine/patient-images",
+                timeout=_TIMEOUT_FAST,
             )
-            return r.ok
+            data = r.json()
+            if not r.ok or not data.get("ok"):
+                print(f"APIClient: get_patient_images failed — {data.get('message')}")
+                return []
+            patients = data.get("patients", [])
+            print(f"APIClient: {len(patients)} enrolled face(s) on server")
+            return patients
         except Exception as e:
-            print(f"APIClient: upload_audit_image error — {e}")
-            return False
+            print(f"APIClient: get_patient_images error — {e}")
+            return []

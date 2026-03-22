@@ -35,8 +35,12 @@ SERVO_MIN_PULSE = 500   # µs
 SERVO_MAX_PULSE = 2500  # µs
 
 # Dispense cycle angles
-SERVO_HOME_ANGLE     = 0    # resting position (degrees) set 3 degree
-SERVO_DISPENSE_ANGLE = 180  # full-swing position (degrees) 140
+SERVO_HOME_ANGLE     = 0    # resting position (degrees)
+SERVO_DISPENSE_ANGLE = 140  # full-swing position (degrees)
+
+# Default resting angles — change these if the physical setup requires it
+SERVO_DEFAULT_ANGLE  = 0    # all dispenser + unused channels rest at 0°
+CAMERA_DEFAULT_ANGLE = 180  # ch14 (camera_control) rests at 180° — faces down at tray
 
 # ── Pill Detection / Dispensing ───────────────────────────────────────────────
 # Auxiliary servo slot indices into SPECIAL_SERVO_CHANNELS.
@@ -45,9 +49,8 @@ SERVO_DISPENSE_ANGLE = 180  # full-swing position (degrees) 140
 CAMERA_TILT_SERVO_INDEX = 0
 TRAY_TILT_SERVO_INDEX   = 1
 
-# Camera repositioning
-CAMERA_TILT_ANGLE    = 90    # degrees — points camera downward at tray
-CAMERA_RETURN_ANGLE  = 0     # degrees — forward-facing (face recognition position)
+# Camera angles
+CAMERA_RETURN_ANGLE  = 0     # face recognition position (forward-facing)
 CAMERA_SETTLE_DELAY  = 1.0   # seconds — wait after repositioning for image to stabilise
 
 # Dispense verification

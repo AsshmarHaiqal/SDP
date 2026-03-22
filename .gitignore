@@ -14,4 +14,3 @@ audit_images/
 .DS_Store
 *.swp
 .vscode/
-.env
