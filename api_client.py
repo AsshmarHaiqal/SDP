@@ -25,13 +25,16 @@ import requests
 
 load_dotenv()
 
-BASE_URL          = "https://www.sdpgroup16.com/api"
+BASE_URL          = "https://www.sdpgroup16.com"
 IDENTIFY_API_KEY  = os.getenv("PILLWHEEL_API_KEY", "")
 
 ADMIN_CREDENTIALS = {
     "username": os.getenv("PILLWHEEL_ADMIN_USER", "root"),
     "password": os.getenv("PILLWHEEL_ADMIN_PASS", "root"),
 }
+
+API_KEY = IDENTIFY_API_KEY
+
 _TIMEOUT_FAST = 5    # seconds — ping / stock / log
 _TIMEOUT_SLOW = 20   # seconds — identify (Claude Vision round-trip)
 

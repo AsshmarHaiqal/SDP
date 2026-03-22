@@ -73,21 +73,16 @@ except (ImportError, Exception) as _e:
 
 
 # ── Colours ────────────────────────────────────────────────────────────────────
-C_BG      = "#1a1a2e"
-C_PANEL   = "#0f0f23"
-C_BLUE    = "#4a9eff"
-C_SUCCESS = "#00c853"
-C_ERROR   = "#ff1744"
-C_WARN    = "#ff9100"
-C_WHITE   = "#ffffff"
-C_MUTED   = "#888888"
-
-# ── Font sizes (pt) ────────────────────────────────────────────────────────────
-F_TITLE  = 36
-F_BODY   = 24
-F_BTN    = 28
-F_STATUS = 14
-F_SMALL  = 16
+C_BG      = "#ebe5d9"   # warm cream background
+C_PANEL   = "#d9d3c7"   # slightly darker cream — camera feed boxes
+C_BLUE    = "#6B9465"   # sage green — primary / action
+C_SUCCESS = "#83B86A"   # lighter green — success states
+C_ERROR   = "#D9948D"   # salmon — errors
+C_WARN    = "#D8C07B"   # gold — warnings / in-progress
+C_ACCENT  = "#E8BED5"   # soft pink — status bar / info accents
+C_WHITE   = "#ffffff"   # white — text on coloured buttons
+C_TEXT    = "#040404"   # near-black — main text on light background
+C_MUTED   = "#7a7a6a"   # warm grey — secondary / hint text
 
 # ── Display ────────────────────────────────────────────────────────────────────
 W, H = 800, 480
@@ -200,11 +195,13 @@ class PillWheelApp:
     # ── Fonts ──────────────────────────────────────────────────────────────────
 
     def _init_fonts(self) -> None:
-        self.f_title  = tkfont.Font(family="Helvetica", size=F_TITLE, weight="bold")
-        self.f_body   = tkfont.Font(family="Helvetica", size=F_BODY)
-        self.f_btn    = tkfont.Font(family="Helvetica", size=F_BTN,   weight="bold")
-        self.f_status = tkfont.Font(family="Helvetica", size=F_STATUS)
-        self.f_small  = tkfont.Font(family="Helvetica", size=F_SMALL)
+        self.f_title  = tkfont.Font(family="Arial", size=42, weight="bold")
+        self.f_h2     = tkfont.Font(family="Arial", size=32, weight="bold")
+        self.f_body   = tkfont.Font(family="Arial", size=22)
+        self.f_btn    = tkfont.Font(family="Arial", size=22, weight="bold")
+        self.f_status = tkfont.Font(family="Arial", size=18, weight="bold")
+        self.f_small  = tkfont.Font(family="Arial", size=18, weight="bold")
+        self.f_large  = tkfont.Font(family="Arial", size=62, weight="bold")
 
     # ── Status bar ─────────────────────────────────────────────────────────────
 
@@ -225,7 +222,7 @@ class PillWheelApp:
         tk.Label(
             self.root,
             textvariable=self._status_var,
-            bg=C_PANEL, fg=C_MUTED,
+            bg=C_ACCENT, fg=C_MUTED,
             font=self.f_status,
             anchor="w", padx=12, pady=4,
         ).pack(side="bottom", fill="x")
@@ -273,7 +270,7 @@ class PillWheelApp:
 
         tk.Button(
             f, text="Maintenance",
-            bg="#2a2a4a", fg=C_MUTED, font=self.f_status,
+            bg=C_PANEL, fg=C_MUTED, font=self.f_status,
             relief="flat", cursor="hand2", padx=14, pady=6,
             command=launch_maintenance,
         ).grid(row=3, column=0, pady=(0, 10))
@@ -288,8 +285,8 @@ class PillWheelApp:
         f.rowconfigure(3, weight=0)
 
         self._scan_heading = tk.StringVar(value="Scanning for face.")
-        tk.Label(f, textvariable=self._scan_heading, bg=C_BG, fg=C_WHITE,
-                 font=self.f_title).grid(row=0, column=0, pady=(20, 4))
+        tk.Label(f, textvariable=self._scan_heading, bg=C_BG, fg=C_TEXT,
+                 font=self.f_h2).grid(row=0, column=0, pady=(20, 4))
 
         self._scan_feed = tk.Label(f, bg=C_PANEL)
         self._scan_feed.grid(row=1, column=0, padx=20, pady=6, sticky="nsew")
@@ -314,7 +311,7 @@ class PillWheelApp:
 
         tk.Label(f, text="Identity Confirmed", bg=C_BG, fg=C_SUCCESS,
                  font=self.f_title).grid(row=0, column=0, pady=(30, 4))
-        tk.Label(f, textvariable=self._verified_name, bg=C_BG, fg=C_WHITE,
+        tk.Label(f, textvariable=self._verified_name, bg=C_BG, fg=C_TEXT,
                  font=self.f_body).grid(row=1, column=0)
         tk.Label(f, textvariable=self._verified_rx, bg=C_BG, fg=C_BLUE,
                  font=self.f_body).grid(row=2, column=0)
@@ -329,8 +326,8 @@ class PillWheelApp:
         f.rowconfigure(1, weight=1)
         f.rowconfigure(2, weight=0)
 
-        tk.Label(f, text="Dispensing Medication", bg=C_BG, fg=C_WHITE,
-                 font=self.f_title).grid(row=0, column=0, pady=(20, 4))
+        tk.Label(f, text="Dispensing Medication", bg=C_BG, fg=C_TEXT,
+                 font=self.f_h2).grid(row=0, column=0, pady=(20, 4))
 
         self._disp_feed = tk.Label(f, bg=C_PANEL)
         self._disp_feed.grid(row=1, column=0, padx=20, pady=6, sticky="nsew")
@@ -352,7 +349,7 @@ class PillWheelApp:
 
         tk.Label(f, text="Medication Dispensed", bg=C_BG, fg=C_SUCCESS,
                  font=self.f_title).grid(row=0, column=0, pady=(30, 4))
-        tk.Label(f, textvariable=self._complete_name, bg=C_BG, fg=C_WHITE,
+        tk.Label(f, textvariable=self._complete_name, bg=C_BG, fg=C_TEXT,
                  font=self.f_body).grid(row=1, column=0)
         tk.Label(f, textvariable=self._complete_details, bg=C_BG, fg=C_BLUE,
                  font=self.f_body).grid(row=2, column=0)
@@ -371,7 +368,7 @@ class PillWheelApp:
 
         tk.Label(f, text="Something Went Wrong", bg=C_BG, fg=C_ERROR,
                  font=self.f_title).grid(row=0, column=0, pady=(30, 4))
-        tk.Label(f, textvariable=self._error_msg, bg=C_BG, fg=C_WHITE,
+        tk.Label(f, textvariable=self._error_msg, bg=C_BG, fg=C_TEXT,
                  font=self.f_body, wraplength=700, justify="center").grid(
             row=1, column=0, padx=30)
         tk.Label(f, text="Please call for assistance", bg=C_BG, fg=C_WARN,
