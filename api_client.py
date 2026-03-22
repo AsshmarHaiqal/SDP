@@ -17,14 +17,21 @@ import re
 import cv2
 import numpy as np
 from datetime import datetime
+from dotenv import load_dotenv
 
 import requests
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-BASE_URL = os.environ.get("SERVER_URL", "https://www.sdpgroup16.com").rstrip("/")
-API_KEY  = os.environ.get("MACHINE_API_KEY", "machine-123456-secure-key")
+load_dotenv()
 
+BASE_URL          = "https://www.sdpgroup16.com/api"
+IDENTIFY_API_KEY  = os.getenv("PILLWHEEL_API_KEY", "")
+
+ADMIN_CREDENTIALS = {
+    "username": os.getenv("PILLWHEEL_ADMIN_USER", "root"),
+    "password": os.getenv("PILLWHEEL_ADMIN_PASS", "root"),
+}
 _TIMEOUT_FAST = 5    # seconds — ping / stock / log
 _TIMEOUT_SLOW = 20   # seconds — identify (Claude Vision round-trip)
 
