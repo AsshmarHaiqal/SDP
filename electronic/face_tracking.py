@@ -15,7 +15,7 @@ MIN_FACE_AREA = 6000  # ~78x78px — reject faces that are too far/small
 
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture('/dev/video0')
 
 def set_servo_angle(angle):
     angle = max (MIN_ANGLE, min(MAX_ANGLE, angle))

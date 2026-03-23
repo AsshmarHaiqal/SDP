@@ -4,6 +4,7 @@ Interactive touchscreen UI for testing PillWheel servos individually.
 
 Buttons 0–12 → rotate corresponding dispenser servo (channel 0–12)
 Tray Sweep   → run tray_sweep.sweep() on channel 15
+Zero All     → return all dispenser servos (ch 0–12) to default angle
 
 Usage:
     export DISPLAY=:0
@@ -45,6 +46,7 @@ C_FG       = "#e6edf3"
 C_MUTED    = "#8b949e"
 C_SUCCESS  = "#3fb950"
 C_ERROR    = "#f85149"
+C_WARN     = "#d97706"
 
 DISPENSER_COUNT = 13   # channels 0–12
 
@@ -54,6 +56,7 @@ class ServoTestUI:
     Touchscreen test panel.
     Each dispenser button calls ServoController.rotate_dispenser(index).
     The Tray Sweep button calls tray_sweep.sweep().
+    The Zero All button calls ServoController.zero_all().
     Buttons are disabled while a motion is in progress to prevent conflicts.
     """
 
@@ -132,7 +135,7 @@ class ServoTestUI:
             grid.columnconfigure(col, weight=1)
             self._btns.append(btn)
 
-        # ── Tray sweep + quit row ─────────────────────────────────────────────
+        # ── Tray sweep / Zero All / Quit row ──────────────────────────────────
         tray_frame = tk.Frame(self.root, bg=C_BG)
         tray_frame.pack(fill="x", padx=14, pady=4)
 
@@ -148,6 +151,19 @@ class ServoTestUI:
             command=self._fire_tray_sweep,
         )
         self._tray_btn.pack(side="left", fill="x", expand=True)
+
+        self._zero_btn = tk.Button(
+            tray_frame,
+            text="↺  ZERO ALL",
+            font=self.f_tray,
+            bg=C_WARN, fg=C_FG,
+            activebackground="#b45309", activeforeground=C_FG,
+            relief="flat", bd=0,
+            highlightbackground=C_BORDER, highlightthickness=1,
+            cursor="hand2", pady=10, padx=24,
+            command=self._fire_zero_all,
+        )
+        self._zero_btn.pack(side="left", padx=(8, 0))
 
         tk.Button(
             tray_frame,
@@ -199,6 +215,19 @@ class ServoTestUI:
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def _fire_zero_all(self):
+        if self._busy:
+            return
+        self._set_busy(True)
+        self._set_status("Zeroing all dispenser servos (ch 0–12)…")
+        self._zero_btn.config(bg="#92400e", state="disabled")
+
+        def _run():
+            self.servo.zero_all()
+            self.root.after(0, self._on_zero_done)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # ── Completion callbacks (main thread) ────────────────────────────────────
 
     def _on_done(self, msg: str, index: int):
@@ -210,6 +239,11 @@ class ServoTestUI:
         self._tray_btn.config(bg=C_TRAY, state="normal")
         self._set_busy(False)
         self._set_status("✔  Tray sweep complete — ready.")
+
+    def _on_zero_done(self):
+        self._zero_btn.config(bg=C_WARN, state="normal")
+        self._set_busy(False)
+        self._set_status("✔  All servos zeroed — ready.")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -223,9 +257,11 @@ class ServoTestUI:
         for btn in self._btns:
             btn.config(state=state, bg=bg)
         self._tray_btn.config(state=state)
+        self._zero_btn.config(state=state)
         if not busy:
-            # Restore tray button colour after non-tray actions
+            # Restore button colours after any action
             self._tray_btn.config(bg=C_TRAY)
+            self._zero_btn.config(bg=C_WARN)
 
     def _highlight_btn(self, index: int, active: bool):
         self._btns[index].config(bg=C_ACTIVE if active else C_IDLE)

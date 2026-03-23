@@ -14,7 +14,7 @@ SENSOR_READ_DELAY = 0.1  # seconds
 
 # Timing
 DISPENSE_TIMEOUT = 30  # seconds
-ROTATION_DELAY = 0.5   # seconds between rotations
+ROTATION_DELAY = 1   # seconds between rotations
 
 # ── PCA9685 / ServoKit ───────────────────────────────────────────────────────
 # The PCA9685 exposes 16 PWM channels (0–15).

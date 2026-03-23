@@ -10,7 +10,7 @@ Screens:
 
 Usage:
     export DISPLAY=:0
-    python3 Firmware/face_tracking_test_ui.py
+    python3 firmware/face_tracking_test_ui.py
 """
 
 import sys
@@ -32,8 +32,12 @@ except ImportError:
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ELECTRONIC = os.path.join(_ROOT, "electronic")   # ← add this
+
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+if _ELECTRONIC not in sys.path:
+    sys.path.insert(0, _ELECTRONIC)
 
 # face_tracking opens ServoKit + VideoCapture at import time
 try:
