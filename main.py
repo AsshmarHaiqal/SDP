@@ -746,6 +746,7 @@ class PillWheelApp:
         self.api.log_dispense_result(
             patient_id      = pid,
             prescription_id = rx["prescription_id"],
+            medicine_id     = rx.get("medicine_code", ""),
             scheduled_time  = rx.get("scheduled_time", ""),
             status          = "TAKEN",
         )
