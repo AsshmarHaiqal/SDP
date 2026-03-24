@@ -16,3 +16,7 @@ audit_images/
 *.swp
 .vscode/
 .env
+voices/
+data/
+*.onnx
+*.onnx.json
