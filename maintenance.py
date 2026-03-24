@@ -189,12 +189,12 @@ class MaintenanceApp:
             pass
 
     def _quit(self):
+        """Close ONLY the maintenance window — don't kill the whole program."""
         self._cam_active = False
         time.sleep(0.15)
         if self._cap and self._cap.isOpened():
             self._cap.release()
         self.root.destroy()
-        sys.exit(0)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  SERVO SCREEN
@@ -498,7 +498,6 @@ class MaintenanceApp:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def launch_maintenance():
-    """Open maintenance UI in a new Tk window (call from main.py)."""
     win = tk.Toplevel()
     win.title("PillWheel — Maintenance")
     win.configure(bg="#1a1a2e")
@@ -506,8 +505,12 @@ def launch_maintenance():
     on_pi = machine.startswith("aarch") or machine.startswith("armv")
     if on_pi:
         win.attributes("-fullscreen", True)
+        win.attributes("-topmost", True)
+        win.after(100, lambda: win.attributes("-topmost", False))
     else:
         win.geometry(f"{W}x{H}")
+    win.lift()
+    win.focus_force()
     MaintenanceApp(win)
 
 

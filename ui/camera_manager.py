@@ -1,5 +1,5 @@
 """
-app/camera_manager.py — Centralised camera ownership and frame loop.
+ui/camera_manager.py — Centralised camera ownership and frame loop.
 
 Handles the conflict between face_tracking (which opens VideoCapture at
 module level) and the rest of the app.  When face_tracking is loaded, all
@@ -84,20 +84,23 @@ class CameraManager:
 
     # ── Frame access ───────────────────────────────────────────────────────────
 
+    @property
+    def latest_frame(self) -> np.ndarray | None:
+        return self._latest
+
     def read_frame(self) -> np.ndarray | None:
         """Thread-safe single frame read."""
         if self._ft:
             try:
-                ret, frame = self._ft.cap.read()
-                return frame if ret else None
+                cap = self._ft.cap
+                if cap and cap.isOpened():
+                    ret, frame = cap.read()
+                    return frame if ret else None
             except Exception:
                 return None
-        with self._lock:
-            if self._cap and self._cap.isOpened():
-                ret, frame = self._cap.read()
-                return frame if ret else None
+        else:
+            with self._lock:
+                if self._cap and self._cap.isOpened():
+                    ret, frame = self._cap.read()
+                    return frame if ret else None
         return None
-
-    @property
-    def latest_frame(self) -> np.ndarray | None:
-        return self._latest

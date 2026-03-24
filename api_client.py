@@ -13,11 +13,49 @@ Endpoint map:
   Patient prescriptions:  GET /api/patients/{patientId}/prescriptions
   Log intake:            POST /api/patients/{patientId}/intake
   Reduce stock:          POST /api/medicines/reduce
+  Identify patient:      POST /api/machine/identify  (multipart, X-API-KEY header)
   Public ping:            GET /api/public/ping
 
 Auth: cookie-based — POST /api/auth/admins/login sets adminId,
       adminUsername, adminRoot session cookies. requests.Session
       stores and replays these automatically.
+
+UNIFIED PATIENT DICT SHAPE
+---------------------------
+Both identify_patient() and get_patient_prescriptions() return the same
+shape so that main.py (asshmarhaiqal) and ui/ classes (winterscone) can
+both consume the result without translation:
+
+{
+    # ── Identity fields (both repos) ──────────────────────────────────
+    "ok":            True,
+    "matched":       True,
+    "patientId":     int,          # ui/ uses this
+    "patient_id":    int,          # main.py uses this  (alias)
+    "firstName":     str,
+    "lastName":      str,
+    "patientName":   str,          # "FirstName LastName"
+    "display_name":  str,          # alias for patientName
+
+    # ── Prescriptions ─────────────────────────────────────────────────
+    "prescriptions": [
+        {
+            # winterscone / ui/ keys:
+            "medicineName":    str,
+            "medicineCode":    str,
+            "quantity":        int,
+
+            # asshmarhaiqal / main.py keys (aliases):
+            "prescription_id": int | None,
+            "medicine_name":   str,
+            "medicine_code":   str,
+            "medicine_number": int,
+            "dosage":          str,
+            "pill_count":      int,
+            "scheduled_time":  str,
+        }
+    ],
+}
 """
 
 import os
@@ -40,6 +78,8 @@ ADMIN_CREDENTIALS = {
     "username": os.getenv("PILLWHEEL_ADMIN_USER", "root"),
     "password": os.getenv("PILLWHEEL_ADMIN_PASS", "root"),
 }
+
+MACHINE_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 _TIMEOUT_FAST = 5
 _TIMEOUT_SLOW = 20
@@ -80,24 +120,65 @@ def _parse_pill_count(dosage: str) -> int:
 
 def _normalize_prescription(p: dict) -> dict:
     """
-    Convert server prescription shape to what main.py expects.
+    Convert server prescription shape into a UNIFIED dict that carries
+    BOTH sets of keys so main.py and ui/ classes work without translation.
 
     Server shape (GET /api/patients/{id}/prescriptions):
-        { medicineId, medicineName, dosage, frequency }
+        { id, medicineId, medicineName, dosage, frequency, scheduledTime }
 
-    main.py expects:
-        { prescription_id, medicine_name, medicine_code,
-          medicine_number, dosage, pill_count, scheduled_time }
+    Returned shape carries both naming conventions.
     """
-    medicine_id = p.get("medicineId", "")
+    medicine_id   = p.get("medicineId", "")
+    medicine_name = p.get("medicineName", "Unknown")
+    dosage        = p.get("dosage", "")
+    pill_count    = _parse_pill_count(dosage)
+    med_number    = _MEDICINE_NUMBER.get(medicine_id, 1)
+    scheduled     = p.get("scheduledTime", "")
+    rx_id         = p.get("id")
+
     return {
-        "prescription_id": p.get("id"),
-        "medicine_name":   p.get("medicineName", "Unknown"),
+        # ── winterscone / ui/ keys ────────────────────────────────────
+        "medicineName":    medicine_name,
+        "medicineCode":    medicine_id,
+        "quantity":        pill_count,
+
+        # ── asshmarhaiqal / main.py keys ──────────────────────────────
+        "prescription_id": rx_id,
+        "medicine_name":   medicine_name,
         "medicine_code":   medicine_id,
-        "medicine_number": _MEDICINE_NUMBER.get(medicine_id, 1),
-        "dosage":          p.get("dosage", ""),
-        "pill_count":      _parse_pill_count(p.get("dosage", "")),
-        "scheduled_time":  p.get("scheduledTime", ""),
+        "medicine_number": med_number,
+        "dosage":          dosage,
+        "pill_count":      pill_count,
+        "scheduled_time":  scheduled,
+    }
+
+
+def _build_patient_dict(
+    patient_id: int,
+    first_name: str,
+    last_name: str,
+    prescriptions: list[dict],
+    matched: bool = True,
+) -> dict:
+    """
+    Build the unified patient dict consumed by both repos.
+    """
+    full_name = f"{first_name} {last_name}".strip() or f"Patient {patient_id}"
+    return {
+        "ok":            True,
+        "matched":       matched,
+
+        # winterscone keys
+        "patientId":     patient_id,
+        "firstName":     first_name,
+        "lastName":      last_name,
+        "patientName":   full_name,
+
+        # asshmarhaiqal keys (aliases)
+        "patient_id":    patient_id,
+        "display_name":  full_name,
+
+        "prescriptions": prescriptions,
     }
 
 
@@ -179,6 +260,82 @@ class APIClient:
     def is_online(self) -> bool:
         return self._check_online()
 
+    # ══════════════════════════════════════════════════════════════════════════
+    #  identify_patient  —  POST /api/identify
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def identify_patient(self, frame: np.ndarray) -> dict | None:
+        """
+        POST /api/machine/identify  (multipart/form-data)
+
+        Server expects:
+            Header:  X-API-KEY
+            Part:    image  (JPEG file)
+
+        Server returns MachineIdentifyResponse:
+            { ok, matched, patientId, firstName, lastName, patientName,
+              prescriptions: [...], message }
+
+        Returns unified patient dict, or None on failure / no match.
+        """
+        if not self._check_online():
+            print("APIClient: identify_patient — server offline")
+            return None
+
+        # Encode frame to JPEG bytes for multipart upload
+        try:
+            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            jpg_bytes = buf.tobytes()
+        except Exception as e:
+            print(f"APIClient: identify_patient encode error — {e}")
+            return None
+
+        try:
+            r = self._session.post(
+                f"{BASE_URL}/api/machine/identify",
+                headers={"X-API-KEY": MACHINE_API_KEY},
+                files={"image": ("face.jpg", jpg_bytes, "image/jpeg")},
+                timeout=_TIMEOUT_SLOW,
+            )
+
+            if not r.ok:
+                print(f"APIClient: identify_patient HTTP {r.status_code}")
+                return None
+
+            data = r.json()
+
+            if not data.get("ok") or not data.get("matched"):
+                msg = data.get("message", "no match")
+                print(f"APIClient: identify_patient — {msg}")
+                return None
+
+            # Server may return prescriptions directly, or we fetch them
+            patient_id = data.get("patientId")
+            first_name = data.get("firstName", "")
+            last_name  = data.get("lastName", "")
+
+            raw_rx = data.get("prescriptions", [])
+            if raw_rx:
+                prescriptions = [_normalize_prescription(p) for p in raw_rx]
+            else:
+                # Fallback: fetch prescriptions separately
+                fallback = self.get_patient_prescriptions(patient_id)
+                if fallback:
+                    return fallback
+                prescriptions = []
+
+            if not prescriptions:
+                print(f"APIClient: identify_patient — matched but no prescriptions")
+                return None
+
+            return _build_patient_dict(
+                patient_id, first_name, last_name, prescriptions
+            )
+
+        except Exception as e:
+            print(f"APIClient: identify_patient error — {e}")
+            return None
+
     # ── Face image sync (FR_MODE=local) ──────────────────────────────────────
 
     def sync_faces_locally(self, faces_dir: str) -> int:
@@ -200,7 +357,6 @@ class APIClient:
 
         os.makedirs(faces_dir, exist_ok=True)
 
-        # 1. Fetch all patient face images
         try:
             r = self._session.get(
                 f"{BASE_URL}/api/admin/patients/images",
@@ -209,7 +365,7 @@ class APIClient:
             if not r.ok:
                 print(f"APIClient: /api/admin/patients/images failed HTTP {r.status_code}")
                 return 0
-            image_list = r.json()   # [{username, image, contentType}]
+            image_list = r.json()
         except Exception as e:
             print(f"APIClient: sync_faces_locally fetch error — {e}")
             return 0
@@ -225,16 +381,13 @@ class APIClient:
                 print(f"  No face image for username={username}")
                 continue
 
-            # 2. Resolve username → patient ID via search
             patient_id = self._resolve_patient_id(username)
             if patient_id is None:
                 print(f"  Could not resolve patient ID for username={username}")
                 continue
 
-            # 3. Decode and save image
             try:
-                # Strip data URI prefix: "data:image/png;base64,..."
-                b64_data = image_uri.split(",", 1)[1] if "," in image_uri else image_uri
+                b64_data  = image_uri.split(",", 1)[1] if "," in image_uri else image_uri
                 img_bytes = base64.b64decode(b64_data)
                 img_array = np.frombuffer(img_bytes, dtype=np.uint8)
                 img       = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -283,13 +436,13 @@ class APIClient:
         Also fetches patient display name via GET /api/admin/patients/{id}
         if authenticated (best-effort).
 
-        Returns patient dict shaped for main.py, or None.
+        Returns unified patient dict, or None.
         """
         if not self._check_online():
             print("APIClient: get_patient_prescriptions — server offline")
             return None
 
-        # 1. Prescriptions (no auth needed)
+        # 1. Prescriptions
         try:
             r = self._session.get(
                 f"{BASE_URL}/api/patients/{patient_id}/prescriptions",
@@ -312,7 +465,8 @@ class APIClient:
             return None
 
         # 2. Patient display name (admin auth, best-effort)
-        display_name = f"Patient {patient_id}"
+        first_name = ""
+        last_name  = ""
         if self._ensure_authed():
             try:
                 r2 = self._session.get(
@@ -320,23 +474,19 @@ class APIClient:
                     timeout=_TIMEOUT_FAST,
                 )
                 if r2.ok:
-                    p     = r2.json()
-                    first = p.get("firstName", "")
-                    last  = p.get("lastName", "")
-                    if first or last:
-                        display_name = f"{first} {last}".strip()
+                    p          = r2.json()
+                    first_name = p.get("firstName", "")
+                    last_name  = p.get("lastName", "")
             except Exception:
                 pass
 
         prescriptions = [_normalize_prescription(p) for p in prescriptions_raw]
 
-        patient = {
-            "patient_id":    patient_id,
-            "display_name":  display_name,
-            "prescriptions": prescriptions,
-        }
+        patient = _build_patient_dict(
+            patient_id, first_name, last_name, prescriptions
+        )
 
-        print(f"APIClient: {display_name} — {len(prescriptions)} prescription(s)")
+        print(f"APIClient: {patient['display_name']} — {len(prescriptions)} prescription(s)")
         return patient
 
     # ── Dispense logging ──────────────────────────────────────────────────────
@@ -354,7 +504,6 @@ class APIClient:
         Always writes to local audit log at data/audit/dispense_log.txt.
         On TAKEN status, also calls POST /api/patients/{id}/intake.
         """
-        # Local audit log (always)
         ts       = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_line = (
             f"{ts} | patient={patient_id} | rx={prescription_id} | "
@@ -374,7 +523,6 @@ class APIClient:
 
         print(f"APIClient: logged locally — {log_line.strip()}")
 
-        # Server intake log (TAKEN only, best-effort)
         if status.upper() != "TAKEN" or not self._check_online():
             return True
 

@@ -1,5 +1,5 @@
 """
-app/screens.py — tkinter screen builders for PillWheel.
+ui/screens.py — tkinter screen builders for PillWheel.
 
 Each build_* function receives the parent Frame and a dict of shared
 StringVars / widget references that the app stores and mutates.
@@ -11,11 +11,12 @@ from .theme import (
 )
 
 
-def build_home(frame: tk.Frame, fonts: dict, on_start):
+def build_home(frame: tk.Frame, fonts: dict, on_start, on_maintenance=None):
     frame.columnconfigure(0, weight=1)
     frame.rowconfigure(0, weight=2)
     frame.rowconfigure(1, weight=2)
     frame.rowconfigure(2, weight=1)
+    frame.rowconfigure(3, weight=1)
 
     tk.Label(frame, text="PillWheel", bg=C_BG, fg=C_BLUE,
              font=fonts["title"]).grid(row=0, column=0, pady=(40, 0))
@@ -29,6 +30,15 @@ def build_home(frame: tk.Frame, fonts: dict, on_start):
 
     tk.Label(frame, text="Press to begin your medication collection",
              bg=C_BG, fg=C_MUTED, font=fonts["small"]).grid(row=2, column=0)
+
+    # Maintenance button — small, unobtrusive, matching the old main.py layout
+    if on_maintenance is not None:
+        tk.Button(
+            frame, text="Maintenance",
+            bg=C_PANEL, fg=C_MUTED, font=fonts["small"],
+            relief="flat", cursor="hand2", padx=14, pady=6,
+            command=on_maintenance,
+        ).grid(row=3, column=0, pady=(0, 10))
 
 
 def build_scanning(frame: tk.Frame, fonts: dict, on_cancel) -> dict:

@@ -1,5 +1,5 @@
 """
-app/theme.py — Shared colours, font sizes, and window constants.
+ui/theme.py — Shared colours, font sizes, and window constants.
 """
 
 # ── Window ─────────────────────────────────────────────────────────────────────

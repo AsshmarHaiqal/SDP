@@ -1,13 +1,17 @@
 """
-app/dispense_flow.py — Pill dispensing logic.
+ui/dispense_flow.py — Pill dispensing logic.
 
 Runs entirely in a background thread.
 Callbacks post results back to the tkinter thread via root.after(0, ...).
 
+Reads the UNIFIED patient dict from api_client.py.  Each prescription
+carries BOTH naming conventions, so this class uses the winterscone keys
+as its primary access pattern but everything works regardless.
+
 Medicine code → dispenser slot mapping:
     slot = int(medicine_code) - 1
     e.g. medicine_code "01" → servo channel 0 (PCA9685 ch 0)
-         medicine_code "03" → servo channel 2
+         medicine_code "VTM01" → looked up via medicine_number - 1
 """
 
 import os
@@ -36,7 +40,8 @@ class DispenseFlow:
     audit_dir   : str    (path to write audit images)
     """
 
-    def __init__(self, servo, pill_rec, tray_sweep, sound, camera, api_client, root, audit_dir: str):
+    def __init__(self, servo, pill_rec, tray_sweep, sound, camera,
+                 api_client, root, audit_dir: str):
         self._servo      = servo
         self._pill_rec   = pill_rec
         self._tray_sweep = tray_sweep
@@ -55,9 +60,9 @@ class DispenseFlow:
         """
         Begin dispensing in a background thread.
 
-          on_status(msg: str)                      — live status label updates
-          on_complete(patient, rx, timestamp: str) — success
-          on_error(msg: str)                       — failure
+          on_status(msg: str)                       — live status label updates
+          on_complete(patient, rx, timestamp: str)   — success
+          on_error(msg: str)                        — failure
         """
         self._stop_flag.clear()
         threading.Thread(
@@ -69,12 +74,23 @@ class DispenseFlow:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _run(self, patient, on_status, on_complete, on_error):
-        rx       = patient["prescriptions"][0]
-        expected = rx["quantity"]           # from API response
-        med_name = rx["medicineName"]
-        med_code = rx.get("medicineCode", "1")
-        slot     = max(0, int(med_code) - 1)     # PCA9685 is 0-indexed
-        pid      = patient["patientId"]
+        rx = patient["prescriptions"][0]
+
+        # Read from unified dict — try winterscone keys first, fall back to
+        # asshmarhaiqal keys so it works no matter which repo produced the dict.
+        expected = rx.get("quantity") or rx.get("pill_count", 1)
+        med_name = rx.get("medicineName") or rx.get("medicine_name", "Unknown")
+        med_code = rx.get("medicineCode") or rx.get("medicine_code", "1")
+        pid      = patient.get("patientId") or patient.get("patient_id")
+
+        # Determine servo slot
+        # If medicine_code is numeric (e.g. "01"), slot = int(code) - 1
+        # If it's an alpha code (e.g. "VTM01"), use medicine_number - 1
+        try:
+            slot = max(0, int(med_code) - 1)
+        except ValueError:
+            med_number = rx.get("medicine_number", 1)
+            slot = max(0, int(med_number) - 1)
 
         def status(msg):
             self._root.after(0, lambda m=msg: on_status(m))
@@ -150,14 +166,25 @@ class DispenseFlow:
         status("Dispensing complete. Collecting medication…")
         self._tray_sweep()
 
-        first_name = patient.get("firstName", patient.get("patientName", "there"))
+        first_name = (
+            patient.get("firstName")
+            or patient.get("display_name", "there").split()[0]
+        )
         self._sound.collected()
         self._sound.speak(f"Have a lovely day, {first_name}")
 
-        # ── 5. Log to API and advance ─────────────────────────────────────────
-        self._api.log_intake(pid, med_code, expected)
+        # ── 5. Log to server ──────────────────────────────────────────────────
+        self._api.log_dispense_result(
+            patient_id      = pid,
+            prescription_id = rx.get("prescription_id") or rx.get("id", 0),
+            medicine_id     = med_code,
+            scheduled_time  = rx.get("scheduled_time") or rx.get("scheduledTime", ""),
+            status          = "TAKEN",
+        )
         self._api.reduce_stock(med_name, expected)
-        if audit_frame is not None:
-            self._api.upload_audit_image(pid, audit_frame, timestamp)
 
-        self._root.after(0, lambda: on_complete(patient, rx, timestamp))
+        # ── 6. Callback to UI ────────────────────────────────────────────────
+        self._root.after(
+            0,
+            lambda: on_complete(patient, rx, timestamp),
+        )
