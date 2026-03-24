@@ -42,7 +42,7 @@ class CameraManager:
             return
         with self._lock:
             if self._cap is None or not self._cap.isOpened():
-                self._cap = cv2.VideoCapture(0)
+                self._cap = cv2.VideoCapture("/dev/video0")
                 time.sleep(0.5)
 
     def close(self) -> None:

@@ -64,7 +64,7 @@ ESPEAK_VOICE  = "en-gb"
 # Avoid abbreviations and acronyms; TTS reads them letter by letter.
 
 PHRASES = {
-    "ready":          "Your medication is ready. Please approach the dispenser.",
+    "ready":          "Your medication is ready.",
     "verifying":      "Please look at the camera. Verifying your identity.",
     "verified":       "Identity confirmed. Welcome.",
     "access_denied":  "Sorry, I could not recognise your face. Please try again, or ask a carer for help.",

@@ -21,7 +21,7 @@ except ImportError:
 
 class LocalFaceRecognition(FaceRecognitionBase):
 
-    def __init__(self, faces_dir: str, camera_index: int = 0):
+    def __init__(self, faces_dir: str, camera_index: str = '/dev/video0'):
         self.faces_dir     = faces_dir
         self.camera_index  = camera_index
         os.makedirs(faces_dir, exist_ok=True)

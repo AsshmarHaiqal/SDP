@@ -13,14 +13,8 @@ import cv2
 import tkinter as tk
 from PIL import Image, ImageTk
 
-CAMERA_INDEX = 3  # change if wrong camera
-
 cap = cv2.VideoCapture('/dev/video0')
-if not cap.isOpened():
-    print(f"ERROR: Could not open camera at index {CAMERA_INDEX}")
-    exit(1)
 
-print(f"Camera opened on /dev/video{CAMERA_INDEX} — press Q or ESC to quit")
 
 root = tk.Tk()
 root.title("Camera Test — press Q or ESC to quit")

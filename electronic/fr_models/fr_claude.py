@@ -34,7 +34,7 @@ class ClaudeFaceRecognition(FaceRecognitionBase):
         self,
         faces_dir: str,
         api_key: str,
-        camera_index: int = 0,
+        camera_index: str = '/dev/video0',
         model: str = CLAUDE_MODEL
     ):
         self.faces_dir    = faces_dir

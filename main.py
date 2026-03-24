@@ -6,7 +6,7 @@ Raspberry Pi care-home medication dispenser.
 
 Run on Pi:
     export DISPLAY=:0
-    sudo -E python3 main.py
+    python3 main.py
 
 Run on laptop (no hardware):
     python3 main.py
@@ -33,10 +33,6 @@ except ImportError:
     print("WARNING: Pillow not installed — pip install Pillow")
 
 # ── Path setup ─────────────────────────────────────────────────────────────────
-# Adds project root and electronic/ so that:
-#   - "from electronic.xxx import ..." works from root
-#   - "from fr_models import ..." works inside facial_recognition.py
-#   - "import face_tracking" works (face_tracking.py lives in electronic/)
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _ELEC = os.path.join(_ROOT, "electronic")
 for _p in (_ROOT, _ELEC):
@@ -49,48 +45,47 @@ from electronic.pill_recogniser import PillRecogniser
 from electronic.tray_sweep import sweep as _tray_sweep
 from electronic.sound_actuator import SoundActuator
 from api_client import APIClient
-from maintenance import launch_maintenance
 
 # ── Facial recognition mode ────────────────────────────────────────────────────
-# "server" — send frame to server; Claude Vision matches against enrolled photos
-# "local"  — download enrolled photos at startup, match on-device using FR model
-FR_MODE = os.environ.get("FR_MODE", "server").lower()   # override: export FR_MODE=local
+FR_MODE = os.environ.get("FR_MODE", "server").lower()
 
 if FR_MODE == "local":
     from electronic.facial_recognition import FacialRecognition
 
-# face_tracking.py opens VideoCapture(0) and ServoKit at module level — only
-# available on Pi with hardware. When present it owns the camera and servo 14.
+# ── face_tracking — MUST be imported before maintenance ───────────────────────
+# face_tracking.py opens VideoCapture at module level and owns the camera.
+# maintenance.py checks sys.modules for it — so it must be loaded first.
 try:
     import face_tracking as _ft
     _FACE_TRACKING = True
-    print("face_tracking: loaded — will use _ft.cap and _ft.kit for face scan")
+    print("face_tracking: loaded ✔")
 except (ImportError, Exception) as _e:
     _ft = None
     _FACE_TRACKING = False
     print(f"face_tracking not available ({_e}) — using inline fallback")
 
-
+# ── Maintenance — imported AFTER face_tracking so sys.modules has it ──────────
+from maintenance import launch_maintenance
 
 # ── Colours ────────────────────────────────────────────────────────────────────
-C_BG      = "#ebe5d9"   # warm cream background
-C_PANEL   = "#d9d3c7"   # slightly darker cream — camera feed boxes
-C_BLUE    = "#6B9465"   # sage green — primary / action
-C_SUCCESS = "#83B86A"   # lighter green — success states
-C_ERROR   = "#D9948D"   # salmon — errors
-C_WARN    = "#D8C07B"   # gold — warnings / in-progress
-C_ACCENT  = "#E8BED5"   # soft pink — status bar / info accents
-C_WHITE   = "#ffffff"   # white — text on coloured buttons
-C_TEXT    = "#040404"   # near-black — main text on light background
-C_MUTED   = "#7a7a6a"   # warm grey — secondary / hint text
+C_BG      = "#ebe5d9"
+C_PANEL   = "#d9d3c7"
+C_BLUE    = "#6B9465"
+C_SUCCESS = "#83B86A"
+C_ERROR   = "#D9948D"
+C_WARN    = "#D8C07B"
+C_ACCENT  = "#E8BED5"
+C_WHITE   = "#ffffff"
+C_TEXT    = "#040404"
+C_MUTED   = "#7a7a6a"
 
 # ── Display ────────────────────────────────────────────────────────────────────
 W, H = 800, 480
 
 # Fallback face-scan constants (used when face_tracking is not available)
-_SCAN_HOME = 180   # degrees
+_SCAN_HOME = 180
 _SCAN_MIN  =   0
-_SCAN_STEP =  10   # larger step → faster sweep (set_servo_angle sleeps 0.5 s/step)
+_SCAN_STEP =  10
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -98,53 +93,27 @@ _SCAN_STEP =  10   # larger step → faster sweep (set_servo_angle sleeps 0.5 s/
 # ══════════════════════════════════════════════════════════════════════════════
 
 class PillWheelApp:
-    """
-    Touchscreen UI and hardware orchestration for PillWheel.
 
-    Hardware modules used:
-        electronic/servo_controller.py  — ServoController  (dispense, camera pan)
-        electronic/tray_sweep.py        — sweep()          (funnel pills to cup)
-        electronic/pill_recogniser.py   — PillRecogniser   (Claude Vision count)
-        electronic/face_tracking.py     — scan_for_face()  (servo + Haar cascade)
-        electronic/facial_recognition.py— FacialRecognition(identify resident)
-        electronic/sound_actuator.py    — SoundActuator    (TTS feedback)
-
-    All hardware calls run in daemon threads; UI updates are posted back to
-    the tkinter main loop via root.after(0, callback).
-    """
-
-    SCAN_TIMEOUT   = 15   # seconds before face-scan gives up
-    MAX_PILL_RETRY = 3    # attempts to verify each dispensed pill
-    COMPLETE_DELAY = 5    # seconds on Complete screen before returning home
-    ERROR_DELAY    = 10   # seconds on Error screen before returning home
+    SCAN_TIMEOUT   = 15
+    MAX_PILL_RETRY = 3
+    COMPLETE_DELAY = 5
+    ERROR_DELAY    = 10
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
 
         # ── Hardware ──────────────────────────────────────────────────────────
-        # ServoController: rotate_dispenser(slot) for dispensing,
-        #                  set_servo_angle(ch, angle) for camera pan (fallback)
-        self.servo = ServoController()
-
-        # PillRecogniser: count_pills(frame=<np.ndarray>) → (count, description)
-        # Passing a frame avoids opening a second VideoCapture on the Pi.
+        self.servo    = ServoController()
         self.pill_rec = PillRecogniser()
-
-        self.sound = SoundActuator()
-
-        # APIClient handles all server communication.
-        self.api = APIClient()
+        self.sound    = SoundActuator()
+        self.api      = APIClient()
 
         # ── Facial recognition ────────────────────────────────────────────────
-        # FR_MODE="server"  → frame is sent to server; Claude Vision identifies
-        # FR_MODE="local"   → faces synced from server at startup, matched on-Pi
         self.fr: "FacialRecognition | None" = None
         if FR_MODE == "local":
             self._sync_and_enroll()
 
         # ── Camera ────────────────────────────────────────────────────────────
-        # When face_tracking is loaded it owns VideoCapture(0) via _ft.cap.
-        # In that case self.cap is never opened to avoid a dual-open conflict.
         self.cap           : cv2.VideoCapture | None = None
         self._cam_lock     = threading.Lock()
         self._latest_frame : np.ndarray | None       = None
@@ -155,7 +124,6 @@ class PillWheelApp:
         self.current_patient: dict | None = None
         self._stop_flag = threading.Event()
 
-        # Build and show UI
         self._init_fonts()
         self._build_ui()
         self._set_status("System ready")
@@ -164,14 +132,6 @@ class PillWheelApp:
     # ── Local FR startup sync ──────────────────────────────────────────────────
 
     def _sync_and_enroll(self) -> None:
-        """
-        Download all enrolled patient face images from the server, save them as
-        <patientId>.jpg in data/server_faces/, then enroll each one into the
-        local FacialRecognition model.
-
-        Filenames are patientId integers so identify() can later recover the id
-        from the matched name string.
-        """
         faces_dir = os.path.join(_ROOT, "data", "server_faces")
         print(f"FR_MODE=local — syncing faces from server to {faces_dir}")
 
@@ -181,11 +141,10 @@ class PillWheelApp:
 
         self.fr = FacialRecognition()
 
-        # Enroll each downloaded image (name = str(patientId))
         for fname in os.listdir(faces_dir):
             if not fname.endswith(".jpg"):
                 continue
-            name = fname.replace(".jpg", "")   # e.g. "42"
+            name = fname.replace(".jpg", "")
             path = os.path.join(faces_dir, fname)
             print(f"Enrolling patient id={name} from {path}")
             self.fr.enroll(name, path)
@@ -381,19 +340,17 @@ class PillWheelApp:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _open_camera(self) -> None:
-        """Open camera. Skipped when face_tracking owns VideoCapture(0)."""
         if _FACE_TRACKING:
-            return   # _ft.cap is always open; we read through it
+            return
         with self._cam_lock:
             if self.cap is None or not self.cap.isOpened():
-                self.cap = cv2.VideoCapture(0)   # TODO: update index if needed
+                self.cap = cv2.VideoCapture('/dev/video0')
                 time.sleep(0.5)
 
     def _close_camera(self) -> None:
-        """Release camera. When face_tracking is active, only stops the feed loop."""
         self._feed_active = False
         if _FACE_TRACKING:
-            return   # leave _ft.cap open for next collection
+            return
         time.sleep(0.12)
         with self._cam_lock:
             if self.cap and self.cap.isOpened():
@@ -401,10 +358,6 @@ class PillWheelApp:
             self.cap = None
 
     def _read_frame(self) -> np.ndarray | None:
-        """
-        Thread-safe single-frame read.
-        Uses face_tracking's global cap when available (avoids dual-open on Pi).
-        """
         if _FACE_TRACKING:
             try:
                 ret, frame = _ft.cap.read()
@@ -420,11 +373,6 @@ class PillWheelApp:
     # ── Continuous camera loop ─────────────────────────────────────────────────
 
     def _start_camera_loop(self) -> None:
-        """
-        Background thread that fills self._latest_frame at ~20 fps so that the
-        face-scan and dispense threads always have a fresh frame without competing
-        on cap.read() calls inside long operations.
-        """
         self._feed_active = True
 
         def _loop() -> None:
@@ -436,7 +384,7 @@ class PillWheelApp:
 
         threading.Thread(target=_loop, daemon=True).start()
 
-    # ── Feed display (tkinter main thread via root.after) ─────────────────────
+    # ── Feed display ───────────────────────────────────────────────────────────
 
     def _start_feed(self, label: tk.Label) -> None:
         self._feed_label = label
@@ -507,7 +455,7 @@ class PillWheelApp:
         _tick(seconds)
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Dispense flow — Step 1: Start (button press)
+    #  Dispense flow — Step 1: Start
     # ══════════════════════════════════════════════════════════════════════════
 
     def _start_collection(self) -> None:
@@ -523,29 +471,18 @@ class PillWheelApp:
         threading.Thread(target=self._face_scan_thread, daemon=True).start()
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Dispense flow — Step 2: Face scan (background thread)
+    #  Dispense flow — Step 2: Face scan
     # ══════════════════════════════════════════════════════════════════════════
 
     def _face_scan_thread(self) -> None:
-        """Dispatch to face_tracking module or inline fallback."""
         if _FACE_TRACKING:
             self._face_scan_via_ft()
         else:
             self._face_scan_inline()
 
     def _face_scan_via_ft(self) -> None:
-        """
-        Face scan using face_tracking's servo (channel 14 via _ft.kit) and
-        Haar cascade, reading from _ft.cap.
-
-        The camera loop is paused first so scan_for_face() has exclusive access
-        to _ft.cap — concurrent reads from two threads cause ret=False which
-        breaks the servo sweep immediately.
-        After the scan the camera loop is restarted for the dispensing feed.
-        """
-        # Give exclusive cap access to scan_for_face
         self._feed_active = False
-        time.sleep(0.12)   # let the camera loop thread exit
+        time.sleep(0.12)
 
         deadline = time.time() + self.SCAN_TIMEOUT
         locked: np.ndarray | None = None
@@ -561,10 +498,8 @@ class PillWheelApp:
                 locked = frame.copy()
                 break
 
-            # Full sweep with no face — pause briefly then retry
             time.sleep(0.3)
 
-        # Restart camera loop for the dispensing live feed
         self._start_camera_loop()
 
         if locked is not None:
@@ -573,10 +508,6 @@ class PillWheelApp:
             self.root.after(0, self._on_face_timeout)
 
     def _face_scan_inline(self) -> None:
-        """
-        Fallback face scan when face_tracking is unavailable.
-        Uses OpenCV Haar cascade + ServoController.set_servo_angle(14, angle).
-        """
         cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
@@ -597,10 +528,9 @@ class PillWheelApp:
                     locked = frame.copy()
                     break
 
-            # Step camera servo via ServoController
             if direction == -1:
                 angle = max(float(_SCAN_MIN), angle - _SCAN_STEP)
-                self.servo.set_servo_angle(14, angle)   # channel 14 = camera_control
+                self.servo.set_servo_angle(14, angle)
                 if angle <= _SCAN_MIN:
                     direction = 1
             else:
@@ -628,11 +558,10 @@ class PillWheelApp:
         )
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Dispense flow — Step 3: Identity check (background thread)
+    #  Dispense flow — Step 3: Identity check
     # ══════════════════════════════════════════════════════════════════════════
 
     def _identify_thread(self, frame: np.ndarray) -> None:
-        """Identify the resident — runs off the UI thread."""
         if _FACE_TRACKING:
             _ft.set_servo_angle(_ft.DEFAULT_ANGLE_CAMERA)
 
@@ -642,7 +571,6 @@ class PillWheelApp:
             self._identify_server(frame)
 
     def _identify_server(self, frame: np.ndarray) -> None:
-        """Send frame to server; server runs Claude Vision and returns patient + prescriptions."""
         patient = self.api.identify_patient(frame)
         if patient:
             self.root.after(0, lambda: self._on_identified(patient))
@@ -653,13 +581,6 @@ class PillWheelApp:
             ))
 
     def _identify_local(self, frame: np.ndarray) -> None:
-        """
-        Match frame against locally-enrolled faces, then fetch prescriptions
-        from the server using the matched patientId.
-
-        Names stored during _sync_and_enroll() are string patientIds ("42"),
-        so converting the matched name back to int gives us the server patientId.
-        """
         if self.fr is None:
             self.root.after(0, lambda: self._on_identity_failed(
                 "Local FR not initialised.\nPlease see a member of staff."
@@ -712,7 +633,7 @@ class PillWheelApp:
         self.root.after(2000, self._start_dispensing)
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Dispense flow — Step 4: Dispensing (background thread)
+    #  Dispense flow — Step 4: Dispensing
     # ══════════════════════════════════════════════════════════════════════════
 
     def _start_dispensing(self) -> None:
@@ -725,7 +646,6 @@ class PillWheelApp:
         threading.Thread(target=self._dispense_thread, daemon=True).start()
 
     def _disp_set(self, msg: str) -> None:
-        """Thread-safe dispensing status label update."""
         self.root.after(0, lambda m=msg: self._disp_status_var.set(m))
 
     def _dispense_thread(self) -> None:
@@ -734,8 +654,6 @@ class PillWheelApp:
         expected = rx["pill_count"]
         med      = rx["medicine_name"]
         pid      = patient["patient_id"]
-
-        # medicine_number is 1-based (1-13); servo channel is 0-based (0-12)
         servo_slot = rx.get("medicine_number", 1) - 1
 
         # ── 1. Wait until tray is clear ────────────────────────────────────────
@@ -764,7 +682,7 @@ class PillWheelApp:
 
             self._disp_set(f"Dispensing pill {i+1} of {expected}...")
             self.servo.rotate_dispenser(servo_slot)
-            time.sleep(1.5)   # let pill settle on tray
+            time.sleep(1.5)
 
             verified = False
             for attempt in range(self.MAX_PILL_RETRY):
@@ -811,13 +729,11 @@ class PillWheelApp:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         audit_dir = os.path.join(_ROOT, "data", "audit")
         os.makedirs(audit_dir, exist_ok=True)
-        audit_path: str | None = None
         if audit_frame is not None:
             audit_path = os.path.join(audit_dir, f"{pid}_{timestamp}.jpg")
             cv2.imwrite(audit_path, audit_frame)
 
         # ── 4. Sweep tray ──────────────────────────────────────────────────────
-        # tray_sweep.sweep() drives channel 15 (tray_tilt) via its own ServoKit
         self._disp_set("Dispensing complete. Collecting medication...")
         _tray_sweep()
 
@@ -825,7 +741,7 @@ class PillWheelApp:
         self.sound.collected()
         self.sound.speak(f"Have a lovely day, {first_name}")
 
-        # ── 5. Log to server and advance to Complete screen ───────────────────
+        # ── 5. Log to server ──────────────────────────────────────────────────
         self.api.log_dispense_result(
             patient_id      = pid,
             prescription_id = rx["prescription_id"],
@@ -837,9 +753,7 @@ class PillWheelApp:
             0, lambda: self._on_dispense_complete(patient, rx, timestamp)
         )
 
-    def _on_dispense_complete(
-        self, patient: dict, rx: dict, timestamp: str
-    ) -> None:
+    def _on_dispense_complete(self, patient: dict, rx: dict, timestamp: str) -> None:
         self._stop_feed()
         name = patient["display_name"]
         ts   = datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%H:%M  %d/%m/%Y")
@@ -883,4 +797,9 @@ if __name__ == "__main__":
         root.resizable(True, True)
 
     app = PillWheelApp(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        if _FACE_TRACKING and _ft is not None and _ft.cap.isOpened():
+            _ft.cap.release()
+            print("Camera released.")

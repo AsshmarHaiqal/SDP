@@ -35,11 +35,11 @@ SERVO_MIN_PULSE = 500   # µs
 SERVO_MAX_PULSE = 2500  # µs
 
 # Dispense cycle angles
-SERVO_HOME_ANGLE     = 0    # resting position (degrees)
-SERVO_DISPENSE_ANGLE = 140  # full-swing position (degrees)
+SERVO_HOME_ANGLE     = 180    # resting position (degrees)
+SERVO_DISPENSE_ANGLE = 40  # full-swing position (degrees)
 
 # Default resting angles — change these if the physical setup requires it
-SERVO_DEFAULT_ANGLE  = 0    # all dispenser + unused channels rest at 0°
+SERVO_DEFAULT_ANGLE  = 180    # all dispenser + unused channels rest at 0°
 CAMERA_DEFAULT_ANGLE = 180  # ch14 (camera_control) rests at 180° — faces down at tray
 
 # ── Pill Detection / Dispensing ───────────────────────────────────────────────

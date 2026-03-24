@@ -32,7 +32,6 @@ from electronic.tray_sweep import sweep as tray_sweep
 SCREEN_W = 800
 SCREEN_H = 480
 
-# Colour palette — dark industrial theme suits a test tool
 C_BG       = "#0d1117"
 C_PANEL    = "#161b22"
 C_BORDER   = "#30363d"

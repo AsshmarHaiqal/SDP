@@ -43,15 +43,25 @@ from electronic.servo_controller import ServoController
 from electronic.tray_sweep import sweep as tray_sweep
 from electronic.sound_actuator import SoundActuator, PHRASES
 
+# ── face_tracking — reuse already-loaded module if main.py loaded it first ────
+# This avoids opening a second VideoCapture(/dev/video0) which would cause the
+# camera to become unavailable to face_tracking.
 try:
-    import electronic.face_tracking as _ft
-    _FT_AVAILABLE = True
+    if "face_tracking" in sys.modules:
+        # main.py already imported it — reuse the same module object
+        _ft = sys.modules["face_tracking"]
+    elif "electronic.face_tracking" in sys.modules:
+        _ft = sys.modules["electronic.face_tracking"]
+    else:
+        # Running standalone — safe to import fresh
+        import electronic.face_tracking as _ft
+    _FT_AVAILABLE = _ft is not None
 except (ImportError, Exception) as _e:
     _ft = None
     _FT_AVAILABLE = False
     print(f"face_tracking not available ({_e})")
 
-# ── Colours (match main.py palette) ───────────────────────────────────────────
+# ── Colours ────────────────────────────────────────────────────────────────────
 C_BG      = "#1a1a2e"
 C_PANEL   = "#0f0f23"
 C_BLUE    = "#4a9eff"
@@ -200,7 +210,6 @@ class MaintenanceApp:
         tk.Label(hdr, text="Servo Test", bg=C_PANEL, fg=C_WHITE,
                  font=self.f_btn).pack(side="left", padx=10)
 
-        # Info label
         tk.Label(f, text="Each button fires one full dispense cycle (0° → 180° → 0°)",
                  bg=C_BG, fg=C_MUTED, font=self.f_small).pack(pady=(8, 4))
 
@@ -213,20 +222,18 @@ class MaintenanceApp:
             row, col = divmod(i, cols)
             grid_f.rowconfigure(row, weight=1)
             grid_f.columnconfigure(col, weight=1)
-            slot = i + 1  # display as 1-based
+            slot = i + 1
             _btn(grid_f, f"Slot {slot}",
                  lambda idx=i: self._test_dispenser(idx),
                  bg=C_BLUE, font=self.f_servo, padx=4, pady=10
                  ).grid(row=row, column=col, padx=4, pady=4, sticky="ew")
 
-        # Tray sweep goes in remaining cell of last row
         grid_f.columnconfigure(3, weight=1)
         _btn(grid_f, "Tray Sweep",
              self._test_tray_sweep,
              bg=C_PURPLE, font=self.f_servo, padx=4, pady=10
              ).grid(row=2, column=3, padx=4, pady=4, sticky="ew")
 
-        # Bottom action row
         bot = tk.Frame(f, bg=C_BG)
         bot.pack(fill="x", padx=20, pady=(0, 10))
 
@@ -245,17 +252,13 @@ class MaintenanceApp:
             pass
 
     def _test_dispenser(self, idx: int):
-        """Fire one full dispense cycle for slot idx (0-based)."""
         self._set_servo_status(f"Running Slot {idx+1}…")
         def run():
             self.servo.rotate_dispenser(idx)
-            self.root.after(0, lambda: self._set_servo_status(
-                f"Slot {idx+1} done ✓"
-            ))
+            self.root.after(0, lambda: self._set_servo_status(f"Slot {idx+1} done ✓"))
         threading.Thread(target=run, daemon=True).start()
 
     def _test_tray_sweep(self):
-        """Run the tray sweep (channel 15, 2 cycles)."""
         self._set_servo_status("Tray sweep running…")
         def run():
             tray_sweep()
@@ -263,7 +266,6 @@ class MaintenanceApp:
         threading.Thread(target=run, daemon=True).start()
 
     def _zero_all_servos(self):
-        """Set every servo (all 16 channels) to 0°."""
         self._set_servo_status("Zeroing all servos…")
         def run():
             self.servo.cleanup()
@@ -275,7 +277,6 @@ class MaintenanceApp:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_camera(self, f: tk.Frame):
-        # Header
         hdr = tk.Frame(f, bg=C_PANEL)
         hdr.pack(fill="x")
         _btn(hdr, "← Back", self._camera_back,
@@ -284,17 +285,14 @@ class MaintenanceApp:
         tk.Label(hdr, text="Camera Test", bg=C_PANEL, fg=C_WHITE,
                  font=self.f_btn).pack(side="left", padx=10)
 
-        # Feed area
         self._cam_label = tk.Label(f, bg=C_PANEL, text="No feed active",
                                    fg=C_MUTED, font=self.f_sub)
         self._cam_label.pack(fill="both", expand=True, padx=20, pady=8)
 
-        # Status
         self._cam_status = tk.StringVar(value="Idle")
         tk.Label(f, textvariable=self._cam_status,
                  bg=C_BG, fg=C_AMBER, font=self.f_small).pack(pady=2)
 
-        # Buttons
         bot = tk.Frame(f, bg=C_BG)
         bot.pack(fill="x", padx=20, pady=(0, 10))
 
@@ -323,14 +321,14 @@ class MaintenanceApp:
     # ── Live feed ──────────────────────────────────────────────────────────────
 
     def _start_live_feed(self):
-        self._stop_camera()   # stop any running feed first
+        self._stop_camera()
         self._cam_active = True
         self._set_cam_status("Opening camera…")
 
         def open_and_loop():
-            if _FT_AVAILABLE:
-                # face_tracking owns the cap; reuse it
-                self._set_cam_status("Live feed active (face_tracking cap)")
+            if _FT_AVAILABLE and _ft is not None:
+                # Reuse face_tracking's already-open cap — don't open a new one
+                self._set_cam_status("Live feed active (shared camera)")
                 while self._cam_active:
                     try:
                         ret, frame = _ft.cap.read()
@@ -340,7 +338,7 @@ class MaintenanceApp:
                         self._push_frame(frame)
                     time.sleep(0.05)
             else:
-                cap = cv2.VideoCapture(0)
+                cap = cv2.VideoCapture('/dev/video0')
                 if not cap.isOpened():
                     self.root.after(0, lambda: self._set_cam_status("Camera not found"))
                     return
@@ -370,11 +368,9 @@ class MaintenanceApp:
         self._set_cam_status("Scanning for face…")
 
         def run():
-            # Temporarily pause any existing camera loop
             face, frame, angle = _ft.scan_for_face(_ft.DEFAULT_ANGLE_CAMERA)
 
             if frame is not None:
-                # Annotate and display the captured frame
                 annotated = frame.copy()
                 if face is not None:
                     x, y, w, h = face
@@ -393,7 +389,6 @@ class MaintenanceApp:
             else:
                 self.root.after(0, lambda: self._set_cam_status("No face found in sweep"))
 
-            # Return servo to home position
             _ft.set_servo_angle(_ft.DEFAULT_ANGLE_CAMERA)
             self._cam_active = False
 
@@ -402,7 +397,6 @@ class MaintenanceApp:
     # ── Frame display helper ───────────────────────────────────────────────────
 
     def _push_frame(self, frame: np.ndarray):
-        """Resize frame and push to camera label (tkinter thread-safe via after)."""
         if not _PIL or self._cam_label is None:
             return
         try:
@@ -441,7 +435,6 @@ class MaintenanceApp:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_speaker(self, f: tk.Frame):
-        # Header
         hdr = tk.Frame(f, bg=C_PANEL)
         hdr.pack(fill="x")
         _btn(hdr, "← Back", lambda: self.show_screen("home"),
@@ -453,11 +446,9 @@ class MaintenanceApp:
         tk.Label(f, text="Press a button to play that phrase",
                  bg=C_BG, fg=C_MUTED, font=self.f_small).pack(pady=(8, 4))
 
-        # Scrollable frame for all phrases
         scroll_f = tk.Frame(f, bg=C_BG)
         scroll_f.pack(fill="both", expand=True, padx=20, pady=4)
 
-        # Map phrase keys to SoundActuator methods
         phrase_map = [
             ("ready",          "Ready for collection",  self.sound.ready_for_collection),
             ("verifying",      "Verifying face",         self.sound.verifying_face),
@@ -490,7 +481,6 @@ class MaintenanceApp:
                      wraplength=180, justify="left"
                      ).pack(fill="x", padx=4, pady=2)
 
-        # Status
         self._speaker_status = tk.StringVar(value="Idle")
         tk.Label(f, textvariable=self._speaker_status,
                  bg=C_BG, fg=C_AMBER, font=self.f_small).pack(pady=(4, 8))
