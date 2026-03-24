@@ -133,6 +133,7 @@ class PillWheelApp:
 
     def _sync_and_enroll(self) -> None:
         faces_dir = os.path.join(_ROOT, "data", "server_faces")
+        os.makedirs(faces_dir, exist_ok=True)
         print(f"FR_MODE=local — syncing faces from server to {faces_dir}")
 
         saved = self.api.sync_faces_locally(faces_dir)
